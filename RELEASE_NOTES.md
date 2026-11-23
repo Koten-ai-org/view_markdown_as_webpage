@@ -15,8 +15,15 @@ python3 serve.py --version
 
 ## Unreleased
 
+---
+
+## 0.4.0 — 2026-11-23
+
+Meta panel, stable phrase colors, and Ask stays closed until a note is used. `VERSION` is **0.4.0**.
+
 - Ask stays closed on a note that has never been used. Opening a note that already has a thread opens the chat. Switching files no longer keeps the previous note's text box open.
-- **Meta** is a gold button and sits immediately to the right of **Actions**. Those two stay put. The other action buttons line up after Meta. It opens a stats line, a packed word cloud, an idea graph, and a section map. Ideas sit in the middle. Keywords and other notes that share them hang off those ideas. A click in the cloud and a click in the graph highlight the same path. Enlarge widens the graph in place. Home, +, and − fit and zoom. Click a note to open it. With AI on, theme names are the ideas, and sections named in the cards are tinted. Theme names use the same file-hash check as the TL;DR: they stay while the note is unchanged and regenerate when it changes. A category name in the word cloud and the graph is wrapped in parentheses. A keyword from the note stays plain. Link nodes keep a light fill in the rail color and a thicker border. A local note is a blue circle, a local file is a green circle, and an external URL is a gray hexagon. Ideas and keywords stay filled circles. Each section bar shows its word count and the strongest idea in that stretch. Hover lists the matching ideas and keywords. Selecting an idea lights the sections that contain it.
+- **Meta** is a gold button and sits immediately to the right of **Actions**. Those two stay put. The other action buttons line up after Meta. It opens a stats line, a packed word cloud, an idea graph, and a section map. Ideas sit in the middle. Keywords and other notes that share them hang off those ideas. A click in the cloud and a click in the graph highlight the same path. Enlarge widens the graph in place. Home, +, and − fit and zoom. Click a note to open it. Each phrase keeps one color from its own text, so the same word is the same color in every note. Turning AI off rebuilds the open cloud and graph from the note's keywords. Turning AI on rebuilds them from the saved themes, or fills those themes in and rebuilds once they arrive. With AI on, theme names are the ideas, and sections named in the cards are tinted. Theme names use the same file-hash check as the TL;DR: they stay while the note is unchanged and regenerate when it changes. A category name in the word cloud and the graph is wrapped in parentheses. A keyword from the note stays plain. Link nodes keep a light fill in the rail color and a thicker border. A local note is a blue circle, a local file is a green circle, and an external URL is a gray hexagon. Ideas and keywords stay filled circles. Each section bar shows its word count and the strongest idea in that stretch. Hover lists the matching ideas and keywords. Selecting an idea lights the sections that contain it.
+- The folder picker keeps the path you submit when the startup listing returns later.
 
 ---
 

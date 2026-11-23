@@ -47,8 +47,8 @@ except ImportError:
 #   GET /api/state → version  (splash header + reader rail; never hard-code in HTML/JS)
 #
 # Bump here, then move Unreleased in RELEASE_NOTES.md and tag vX.Y.Z.
-# Current: 0.3.0 — notes rail can show the real file name.
-VERSION = "0.3.0"
+# Current: 0.4.0 — Meta panel, stable phrase colors, and Ask stays closed until a note is used.
+VERSION = "0.4.0"
 
 def bundled_dir() -> Path:
     meipass = getattr(sys, "_MEIPASS", None)
