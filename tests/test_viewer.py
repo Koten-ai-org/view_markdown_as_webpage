@@ -573,20 +573,91 @@ class ViewerFoldTests(unittest.TestCase):
         toggle = page.locator("#memory-meta-toggle")
         expect(toggle).to_be_visible()
         expect(toggle).to_have_text("Meta")
+        expect(toggle).to_have_css("background-color", "rgb(240, 180, 41)")
         expect(page.locator("#memory-meta")).to_be_hidden()
         toggle.click()
+        expect(toggle).to_have_css("background-color", "rgb(196, 137, 13)")
         expect(page.locator("#memory-meta")).to_be_visible()
         expect(page.locator("#memory-meta-stats")).to_contain_text("words")
         expect(page.locator("#memory-meta-stats")).to_contain_text("heading")
         expect(page.locator(".cloud-word", has_text="fixture notes")).to_be_visible()
         page.locator(".cloud-word", has_text="fixture notes").click()
         expect(page.locator("#doc mark.kw-hit").first).to_be_visible()
+        expect(page.locator(".cloud-word.is-on", has_text="fixture notes")).to_be_visible()
+        expect(page.locator(".cloud-word.is-dim", has_text="root note")).to_be_visible()
+        expect(page.locator(".section-block.is-on")).to_be_visible()
         expect(page.locator("#memory-sections")).to_contain_text("Fixture notes")
+        expect(page.locator(".section-count").first).to_have_text("6")
+        page.locator(".section-block").first.hover()
+        expect(page.locator("#section-tip")).to_be_visible()
+        expect(page.locator("#section-tip")).to_contain_text("6 words")
+        expect(page.locator("#section-tip")).to_contain_text("fixture notes")
+        expect(page.locator("#memory-cloud")).to_have_attribute("data-packed", "1")
+        expect(page.locator(".cloud-topic")).to_have_count(0)
         expect(page.locator("#memory-graph canvas")).to_be_visible()
+        spread = page.locator("#memory-graph").evaluate(
+            """el => {
+              const chart = window.echarts && window.echarts.getInstanceByDom(el);
+              if (!chart) return null;
+              const series = (chart.getOption().series || [])[0] || {};
+              const nodes = series.data || [];
+              const xs = nodes.map(n => Number(n.x) || 0);
+              const ys = nodes.map(n => Number(n.y) || 0);
+              const kws = nodes.filter(n => String(n.id || "").indexOf("kw:") === 0);
+              const notes = nodes.filter(n => String(n.id || "").indexOf("note:") === 0);
+              const links = series.links || [];
+              return {
+                n: nodes.length,
+                dx: Math.max.apply(null, xs) - Math.min.apply(null, xs),
+                dy: Math.max.apply(null, ys) - Math.min.apply(null, ys),
+                sizes: kws.map(n => n.symbolSize),
+                curved: links.length > 0 && links.every(l => l.lineStyle && l.lineStyle.curveness === 0.3),
+                noteFill: notes.map(n => (n.itemStyle && n.itemStyle.color) || ""),
+                noteBorder: notes.map(n => (n.itemStyle && n.itemStyle.borderColor) || ""),
+                noteSymbol: notes.map(n => n.symbol || "circle"),
+                noteWidth: notes.map(n => n.itemStyle && n.itemStyle.borderWidth),
+                kwFilled: kws.every(n => {
+                  const color = n.itemStyle && n.itemStyle.color;
+                  const name = String(n.name || "");
+                  return !!color && color !== "transparent" && String(n.symbol || "circle").indexOf("path://") !== 0 && name.charAt(0) !== "(";
+                }),
+              };
+            }"""
+        )
+        self.assertIsNotNone(spread)
+        self.assertGreaterEqual(spread["n"], 4)
+        self.assertGreater(spread["dx"], 100)
+        self.assertGreater(spread["dy"], 50)
+        self.assertEqual(len(spread["sizes"]), 2)
+        self.assertNotEqual(spread["sizes"][0], spread["sizes"][1])
+        self.assertTrue(spread["curved"])
+        self.assertTrue(spread["kwFilled"])
+        self.assertGreaterEqual(len(spread["noteFill"]), 1)
+        self.assertTrue(all(str(color).startswith("rgba(0,180,230,") or str(color).startswith("rgba(0, 180, 230,") for color in spread["noteFill"]))
+        self.assertTrue(all(color == "#00b4e6" for color in spread["noteBorder"]))
+        self.assertTrue(all(symbol == "circle" for symbol in spread["noteSymbol"]))
+        self.assertTrue(all((width or 0) >= 3 for width in spread["noteWidth"]))
+        page.locator("#memory-graph-expand").click()
+        expect(page.locator("#memory-meta")).to_have_class("memory-meta is-wide")
+        expect(page.locator("#memory-graph canvas")).to_be_visible()
+        page.locator("#memory-graph-home").click()
+        expect(page.locator(".cloud-word.is-dim")).to_have_count(0)
+        page.locator("#memory-graph-expand").click()
+        expect(page.locator("#memory-graph-expand")).to_have_attribute("aria-pressed", "false")
         page.locator("#ai-toggle").click()
-        expect(page.locator("#memory-cloud-title")).to_have_text("Word cloud · themes")
-        expect(page.locator(".cloud-topic").first).to_be_visible()
-        expect(page.locator("#memory-legend-rel")).to_have_text("Theme")
+        expect(page.locator("#memory-actions .memory-action").first).to_be_visible()
+        place = page.evaluate(
+            """() => {
+              const meta = document.getElementById("memory-meta-toggle").getBoundingClientRect();
+              const action = document.querySelector("#memory-actions .memory-action").getBoundingClientRect();
+              return { meta: meta.left, action: action.left };
+            }"""
+        )
+        self.assertLess(place["meta"], place["action"])
+        expect(page.locator("#memory-cloud-title")).to_have_text("Word cloud")
+        expect(page.locator("#memory-cloud")).to_have_attribute("data-packed", "1")
+        expect(page.locator(".cloud-topic")).to_have_count(0)
+        expect(page.locator("#memory-graph-legend")).to_contain_text("Idea")
         expect(page.locator(".section-block.is-hot")).to_be_visible()
         toggle.click()
         expect(page.locator("#memory-meta")).to_be_hidden()

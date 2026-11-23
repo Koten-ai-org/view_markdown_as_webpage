@@ -1416,6 +1416,9 @@ def cheap_doc(text: str, rel: str, known: set[str], sha: str, nbytes: int, prev:
     keywords = keyword_counts(text)
     links = extract_local_links(text, rel, known)
     prev = prev if isinstance(prev, dict) else {}
+    same = prev.get("sha256") == sha
+    keyword_topics = [row[0] for row in keywords[:8]]
+    kept_topics = [str(item).strip() for item in (prev.get("topics") or []) if str(item).strip()]
     return {
         "sha256": sha,
         "bytes": nbytes,
@@ -1424,11 +1427,11 @@ def cheap_doc(text: str, rel: str, known: set[str], sha: str, nbytes: int, prev:
         "links": links,
         "keywords": keywords,
         "related": [],
-        "topics": [row[0] for row in keywords[:8]],
-        "tldr": list(prev.get("tldr") or []) if prev.get("sha256") == sha else [],
-        "next_action": (prev.get("next_action") or "") if prev.get("sha256") == sha else "",
-        "important": (prev.get("important") or "") if prev.get("sha256") == sha else "",
-        "rich": bool(prev.get("rich")) if prev.get("sha256") == sha else False,
+        "topics": kept_topics[:8] if same and prev.get("rich") and kept_topics else keyword_topics,
+        "tldr": list(prev.get("tldr") or []) if same else [],
+        "next_action": (prev.get("next_action") or "") if same else "",
+        "important": (prev.get("important") or "") if same else "",
+        "rich": bool(prev.get("rich")) if same else False,
         "seen_at": utc_now(),
         "visits": int(prev.get("visits") or 0) + 1,
     }

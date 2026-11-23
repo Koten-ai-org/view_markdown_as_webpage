@@ -88,8 +88,8 @@
           <div class="memory-keys" id="memory-keys"></div>
           <div class="memory-related" id="memory-related"></div>
           <div class="memory-toolbar">
-            <div class="memory-actions" id="memory-actions" hidden></div>
             <button type="button" class="memory-action memory-meta-toggle" id="memory-meta-toggle" aria-expanded="false" aria-controls="memory-meta">Meta</button>
+            <div class="memory-actions" id="memory-actions" hidden></div>
           </div>
           <div class="memory-meta" id="memory-meta" hidden>
             <p class="memory-meta-stats" id="memory-meta-stats"></p>
@@ -98,15 +98,24 @@
                 <h3 id="memory-cloud-title">Word cloud</h3>
                 <div id="memory-cloud" class="memory-cloud"></div>
               </section>
-              <section class="memory-meta-pane">
-                <h3>Links</h3>
+              <section class="memory-meta-pane memory-graph-pane">
+                <div class="memory-pane-head">
+                  <h3>Ideas</h3>
+                  <div class="memory-graph-tools" role="group" aria-label="Graph view">
+                    <button type="button" id="memory-graph-home" title="Fit the graph and clear the selection">Home</button>
+                    <button type="button" id="memory-graph-out" title="Zoom out">−</button>
+                    <button type="button" id="memory-graph-in" title="Zoom in">+</button>
+                    <button type="button" id="memory-graph-expand" aria-pressed="false" title="Use the full width of the strip">Enlarge</button>
+                  </div>
+                </div>
                 <div id="memory-graph" class="memory-graph"></div>
                 <p class="memory-meta-legend" id="memory-graph-legend">
                   <span class="lg lg-me">This note</span>
-                  <span class="lg lg-note">Note</span>
-                  <span class="lg lg-site">Site</span>
+                  <span class="lg lg-idea">(Idea)</span>
                   <span class="lg lg-kw">Keyword</span>
-                  <span class="lg lg-rel" id="memory-legend-rel">Related</span>
+                  <span class="lg lg-note">Local note</span>
+                  <span class="lg lg-file">Local file</span>
+                  <span class="lg lg-ext">External</span>
                 </p>
               </section>
             </div>
