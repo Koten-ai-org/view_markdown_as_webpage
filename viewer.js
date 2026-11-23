@@ -73,6 +73,7 @@
   ];
 
   function keywordColor(term) {
+    // The same trimmed lowercase string always lands on the same palette color.
     const s = String(term || "").trim().toLowerCase();
     let h = 2166136261;
     for (let i = 0; i < s.length; i++) {
@@ -1587,7 +1588,7 @@
         row.kind = "idea";
         row.idea = idea.name;
         row.term = idea.name;
-        row.color = idea.color;
+        row.color = keywordColor(idea.name);
         rows.push(row);
       }
       idea.keywords.forEach(function (kw) {
@@ -1598,7 +1599,7 @@
         row.kind = "keyword";
         row.idea = idea.name;
         row.term = kw.term;
-        row.color = idea.color;
+        row.color = keywordColor(kw.term);
         rows.push(row);
       });
     });
@@ -1653,7 +1654,9 @@
     btn.setAttribute("data-idea", pair.idea || term);
     btn.setAttribute("data-kind", pair.kind || "keyword");
     btn.textContent = pair.kind === "idea" ? "(" + term + ")" : term;
-    btn.style.color = pair.color || keywordColor(term);
+    const color = keywordColor(pair.term || term);
+    btn.setAttribute("data-color", color);
+    btn.style.color = color;
     btn.style.fontSize = cloudFontPx(n, max, bigPx) + "px";
     btn.style.fontWeight = pair.kind === "idea" || n / max > 0.45 ? "700" : "600";
     bindCloudWord(btn);
@@ -2303,13 +2306,15 @@
     ideas.forEach(function (idea, i) {
       const ang = -Math.PI / 2 + (i / count) * Math.PI * 2;
       const only = keywordOnly(idea);
+      const ideaColor = keywordColor(idea.name);
       const hubRing = ideas.length === 1 ? 0 : 0.28;
       const hubPos = ideas.length === 1 ? { x: cx, y: cy } : atRing(ang, hubRing, width, height);
       let hubId = "";
       if (only) {
         const kw = idea.keywords[0];
+        const kwColor = keywordColor(kw.term);
         hubId = "kw:" + kw.term.toLowerCase();
-        nodes.push(graphNode(hubId, kw.term, freqSize(kw.count, maxW, 22, 58), idea.color, {
+        nodes.push(graphNode(hubId, kw.term, freqSize(kw.count, maxW, 22, 58), kwColor, {
           kind: "keyword",
           term: kw.term,
           idea: idea.name,
@@ -2318,12 +2323,12 @@
         }));
       } else {
         hubId = "idea:" + idea.name.toLowerCase();
-        const ideaNode = graphNode(hubId, categoryLabel(idea.name), freqSize(idea.weight, maxW, 28, 60), idea.color, {
+        const ideaNode = graphNode(hubId, categoryLabel(idea.name), freqSize(idea.weight, maxW, 28, 60), ideaColor, {
           kind: "idea",
           idea: idea.name,
           x: hubPos.x,
           y: hubPos.y,
-          itemStyle: { color: idea.color, borderColor: "#14202c", borderWidth: 1.5 },
+          itemStyle: { color: ideaColor, borderColor: "#14202c", borderWidth: 1.5 },
         });
         ideaNode.name = categoryLabel(idea.name);
         nodes.push(ideaNode);
@@ -2335,17 +2340,18 @@
           const kAng = ang - span / 2 + (k + 0.5) * (span / orbit.length);
           const pos = atRing(kAng, 0.52, width, height);
           const id = "kw:" + kw.term.toLowerCase();
-          nodes.push(graphNode(id, kw.term, freqSize(kw.count, maxW, 16, 46), idea.color, {
+          const kwColor = keywordColor(kw.term);
+          nodes.push(graphNode(id, kw.term, freqSize(kw.count, maxW, 16, 46), kwColor, {
             kind: "keyword",
             term: kw.term,
             idea: idea.name,
             x: pos.x,
             y: pos.y,
           }));
-          links.push(graphEdge(id, hubId, false, idea.color));
+          links.push(graphEdge(id, hubId, false, kwColor));
         });
       }
-      links.push(graphEdge(hubId, "me", true, idea.color));
+      links.push(graphEdge(hubId, "me", true, ideaColor));
       idea.notes.forEach(function (note, j) {
         if (used[note.path]) return;
         used[note.path] = true;
@@ -2365,8 +2371,8 @@
         });
         styleLinkNode(node, "note");
         nodes.push(node);
-        links.push(graphEdge(id, hubId, false, idea.color));
-        if (!only && !viaSame) links.push(graphEdge(id, kwId, false, idea.color));
+        links.push(graphEdge(id, hubId, false, ideaColor));
+        if (!only && !viaSame) links.push(graphEdge(id, kwId, false, keywordColor(note.via)));
       });
     });
 
@@ -2522,7 +2528,13 @@
     });
   }
 
+  function metaModeFor(doc) {
+    return (aiEnabled() && doc && doc.rich) ? "ai" : "off";
+  }
+
   function renderMeta(doc) {
+    const panel = document.getElementById("memory-meta");
+    if (panel) panel.setAttribute("data-meta-mode", metaModeFor(doc));
     const stats = document.getElementById("memory-meta-stats");
     const words = noteWordCount();
     const minutes = words ? Math.max(1, Math.round(words / 220)) : 0;
@@ -2638,7 +2650,7 @@
       renderMemory(data);
       if (aiEnabled() && data.doc && !data.doc.rich) {
         const rich = await postJSON("/api/memory/enrich", { path: path });
-        if (gen !== memoryGen || path !== currentPath) return;
+        if (gen !== memoryGen || path !== currentPath || !aiEnabled()) return;
         if (rich && rich.doc) renderMemory(rich);
       }
     } catch (err) {
@@ -3960,6 +3972,9 @@
     applyAiEnabled(on);
     btn.addEventListener("click", function () {
       applyAiEnabled(!aiEnabled());
+      // Repaint the open cloud and graph in the new mode before the visit returns.
+      // AI off drops stored themes. AI on uses them when the note is already rich,
+      // and syncMemory fills them in when it is not.
       if (currentPath) renderMemoryFromLast();
       if (currentPath) renderChat(lastChat || { messages: [] });
       if (currentPath) syncMemory(currentPath);
