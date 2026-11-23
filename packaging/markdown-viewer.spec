@@ -54,7 +54,6 @@ if sys.platform == "darwin":
         strip=False,
         upx=False,
         console=False,
-        argv_emulation=True,
         icon=ICON if os.path.isfile(ICON) else None,
     )
     coll = COLLECT(

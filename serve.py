@@ -2669,31 +2669,6 @@ def open_browser(url: str) -> None:
     threading.Thread(target=_open, name="mdview-browser", daemon=True).start()
 
 
-def become_dock_app() -> None:
-    """Keep a normal Dock icon so Quit is on the icon menu. A windowed build can stay hidden."""
-    if sys.platform != "darwin":
-        return
-    try:
-        import ctypes
-
-        lib = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.dylib")
-        lib.objc_getClass.restype = ctypes.c_void_p
-        lib.sel_registerName.restype = ctypes.c_void_p
-        send = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(("objc_msgSend", lib))
-        send_bool = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool)(
-            ("objc_msgSend", lib)
-        )
-        send_long = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long)(
-            ("objc_msgSend", lib)
-        )
-        shared = send(lib.objc_getClass(b"NSApplication"), lib.sel_registerName(b"sharedApplication"))
-        # NSApplicationActivationPolicyRegular
-        send_long(shared, lib.sel_registerName(b"setActivationPolicy:"), 0)
-        send_bool(shared, lib.sel_registerName(b"activateIgnoringOtherApps:"), True)
-    except Exception:
-        return
-
-
 def run_status_window(url: str, httpd: ThreadingHTTPServer, on_documents=None) -> int:
     try:
         import tkinter as tk
@@ -2705,11 +2680,9 @@ def run_status_window(url: str, httpd: ThreadingHTTPServer, on_documents=None) -
             print("\nstopped", flush=True)
         return 0
 
-    become_dock_app()
     root = tk.Tk()
     root.title("Markdown Viewer")
     root.resizable(False, False)
-    become_dock_app()
     icon = APP_DIR / "icons" / "app.png"
     if icon.is_file():
         try:
@@ -2793,7 +2766,6 @@ def main() -> int:
     frozen = bool(getattr(sys, "frozen", False))
     if frozen:
         setup_frozen_log()
-        become_dock_app()
 
     cfg = load_config()
     if args.host:
