@@ -33,7 +33,7 @@ from html.parser import HTMLParser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, unquote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 try:
@@ -47,8 +47,8 @@ except ImportError:
 #   GET /api/state → version  (splash header + reader rail; never hard-code in HTML/JS)
 #
 # Bump here, then move Unreleased in RELEASE_NOTES.md and tag vX.Y.Z.
-# Current: 0.4.0 — Meta panel, stable phrase colors, and Ask stays closed until a note is used.
-VERSION = "0.4.0"
+# Current: 0.4.1 — Dock icon with Quit, and Finder Open With for markdown files.
+VERSION = "0.4.1"
 
 def bundled_dir() -> Path:
     meipass = getattr(sys, "_MEIPASS", None)
@@ -1715,6 +1715,26 @@ def expand_dir(raw: str) -> Path:
     return Path(raw or "~").expanduser().resolve()
 
 
+def resolve_launch_path(raw: str | None) -> tuple[str | None, str]:
+    """Return (folder, note). A markdown file opens its parent folder and that note."""
+    if not raw:
+        return None, ""
+    path = Path(raw).expanduser()
+    try:
+        path = path.resolve()
+    except OSError:
+        return raw, ""
+    if path.is_file() and path.suffix.lower() in MD_SUFFIXES:
+        return str(path.parent), path.name
+    return str(path), ""
+
+
+def note_url(base: str, doc: str) -> str:
+    if not doc:
+        return base
+    return base.rstrip("/") + "/viewer.html?doc=" + quote(doc)
+
+
 def pick_notes_dir(cli_root: str | None, cfg: dict) -> Path | None:
     """CLI folder wins; otherwise reopen last from config.local.json if it still exists."""
     if cli_root:
@@ -2649,7 +2669,32 @@ def open_browser(url: str) -> None:
     threading.Thread(target=_open, name="mdview-browser", daemon=True).start()
 
 
-def run_status_window(url: str, httpd: ThreadingHTTPServer) -> int:
+def become_dock_app() -> None:
+    """Keep a normal Dock icon so Quit is on the icon menu. A windowed build can stay hidden."""
+    if sys.platform != "darwin":
+        return
+    try:
+        import ctypes
+
+        lib = ctypes.cdll.LoadLibrary("/usr/lib/libobjc.dylib")
+        lib.objc_getClass.restype = ctypes.c_void_p
+        lib.sel_registerName.restype = ctypes.c_void_p
+        send = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(("objc_msgSend", lib))
+        send_bool = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool)(
+            ("objc_msgSend", lib)
+        )
+        send_long = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long)(
+            ("objc_msgSend", lib)
+        )
+        shared = send(lib.objc_getClass(b"NSApplication"), lib.sel_registerName(b"sharedApplication"))
+        # NSApplicationActivationPolicyRegular
+        send_long(shared, lib.sel_registerName(b"setActivationPolicy:"), 0)
+        send_bool(shared, lib.sel_registerName(b"activateIgnoringOtherApps:"), True)
+    except Exception:
+        return
+
+
+def run_status_window(url: str, httpd: ThreadingHTTPServer, on_documents=None) -> int:
     try:
         import tkinter as tk
         from tkinter import ttk
@@ -2660,9 +2705,11 @@ def run_status_window(url: str, httpd: ThreadingHTTPServer) -> int:
             print("\nstopped", flush=True)
         return 0
 
+    become_dock_app()
     root = tk.Tk()
     root.title("Markdown Viewer")
     root.resizable(False, False)
+    become_dock_app()
     icon = APP_DIR / "icons" / "app.png"
     if icon.is_file():
         try:
@@ -2674,18 +2721,37 @@ def run_status_window(url: str, httpd: ThreadingHTTPServer) -> int:
     pad = ttk.Frame(root, padding=16)
     pad.grid(row=0, column=0)
     ttk.Label(pad, text="Markdown Viewer v%s" % VERSION).grid(row=0, column=0, columnspan=2, sticky="w")
-    ttk.Label(pad, text=url).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 12))
+    ttk.Label(pad, text=url).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 4))
+    ttk.Label(pad, text="The icon stays in the Dock. Right-click it and choose Quit.").grid(
+        row=2, column=0, columnspan=2, sticky="w", pady=(0, 12)
+    )
 
     def open_site() -> None:
         open_browser(url)
 
+    stopping = {"on": False}
+
     def quit_app() -> None:
+        if stopping["on"]:
+            return
+        stopping["on"] = True
         threading.Thread(target=httpd.shutdown, name="mdview-stop", daemon=True).start()
         root.destroy()
 
-    ttk.Button(pad, text="Open in browser", command=open_site).grid(row=2, column=0, padx=(0, 8))
-    ttk.Button(pad, text="Quit", command=quit_app).grid(row=2, column=1)
+    ttk.Button(pad, text="Open in browser", command=open_site).grid(row=3, column=0, padx=(0, 8))
+    ttk.Button(pad, text="Quit", command=quit_app).grid(row=3, column=1)
     root.protocol("WM_DELETE_WINDOW", quit_app)
+    if sys.platform == "darwin":
+        try:
+            root.createcommand("::tk::mac::Quit", quit_app)
+            if on_documents is not None:
+                def _opened(*paths: str) -> None:
+                    on_documents([str(path) for path in paths])
+
+                root.createcommand("::tk::mac::OpenDocument", _opened)
+        except tk.TclError:
+            pass
+    root.lift()
     root.mainloop()
     return 0
 
@@ -2727,6 +2793,7 @@ def main() -> int:
     frozen = bool(getattr(sys, "frozen", False))
     if frozen:
         setup_frozen_log()
+        become_dock_app()
 
     cfg = load_config()
     if args.host:
@@ -2736,8 +2803,9 @@ def main() -> int:
     if args.title:
         cfg["title"] = args.title
 
+    folder_arg, launch_doc = resolve_launch_path(args.root)
     try:
-        notes_dir = pick_notes_dir(args.root, cfg)
+        notes_dir = pick_notes_dir(folder_arg, cfg)
     except FileNotFoundError as err:
         fatal_dialog(str(err))
         return 2
@@ -2767,12 +2835,43 @@ def main() -> int:
     print("  Ctrl-C to stop", flush=True)
     want_browser = (frozen or args.browser) and not args.no_browser
     want_gui = frozen and not args.no_gui
+    start_url = note_url(url, launch_doc)
+    opened = {"path": "", "at": 0.0}
+
+    def present_path(raw: str) -> None:
+        folder, doc = resolve_launch_path(raw)
+        if not folder:
+            return
+        key = folder + "\0" + doc
+        now = time.time()
+        if key == opened["path"] and now - opened["at"] < 2:
+            return
+        opened["path"] = key
+        opened["at"] = now
+        target = Path(folder)
+        if not target.is_dir():
+            return
+        current = state.notes_dir.resolve() if state.notes_dir else None
+        if current != target:
+            try:
+                state.open_folder(str(target))
+            except ValueError:
+                return
+        open_browser(note_url(url, doc) if doc else url)
+
+    def present_paths(paths: list[str]) -> None:
+        for raw in paths:
+            present_path(raw)
+
     if want_browser:
-        open_browser(url)
+        if launch_doc and folder_arg:
+            opened["path"] = folder_arg + "\0" + launch_doc
+            opened["at"] = time.time()
+        open_browser(start_url)
     if want_gui:
         worker = threading.Thread(target=httpd.serve_forever, name="mdview-http", daemon=True)
         worker.start()
-        return run_status_window(url, httpd)
+        return run_status_window(url, httpd, present_paths)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

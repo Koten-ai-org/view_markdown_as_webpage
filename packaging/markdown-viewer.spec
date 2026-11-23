@@ -54,6 +54,7 @@ if sys.platform == "darwin":
         strip=False,
         upx=False,
         console=False,
+        argv_emulation=True,
         icon=ICON if os.path.isfile(ICON) else None,
     )
     coll = COLLECT(
@@ -77,6 +78,29 @@ if sys.platform == "darwin":
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "12.0",
             "NSHumanReadableCopyright": "Apache-2.0",
+            "CFBundleDocumentTypes": [
+                {
+                    "CFBundleTypeName": "Markdown document",
+                    "CFBundleTypeRole": "Viewer",
+                    "LSHandlerRank": "Alternate",
+                    "LSItemContentTypes": [
+                        "net.daringfireball.markdown",
+                        "public.markdown",
+                    ],
+                    "CFBundleTypeExtensions": ["md", "markdown", "mdown", "mkd"],
+                }
+            ],
+            "UTImportedTypeDeclarations": [
+                {
+                    "UTTypeIdentifier": "net.daringfireball.markdown",
+                    "UTTypeDescription": "Markdown document",
+                    "UTTypeConformsTo": ["public.plain-text", "public.text"],
+                    "UTTypeTagSpecification": {
+                        "public.filename-extension": ["md", "markdown", "mdown", "mkd"],
+                        "public.mime-type": ["text/markdown", "text/x-markdown"],
+                    },
+                }
+            ],
         },
     )
 else:
