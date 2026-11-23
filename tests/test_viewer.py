@@ -536,6 +536,61 @@ class ViewerFoldTests(unittest.TestCase):
         page.locator("#ai-toggle").click()
         expect(page.locator("#ai-toggle")).to_have_attribute("aria-pressed", "false")
 
+    def test_meta_panel_cloud_graph_and_sections(self):
+        page = self._open_reader()
+
+        def handle_visit(route):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "ok": True,
+                    "doc": {
+                        "path": "README.md",
+                        "title": "Fixture notes",
+                        "sha256": "meta-pack",
+                        "headings": ["Fixture notes"],
+                        "links": ["blogs/two.md"],
+                        "keywords": [["fixture notes", 6], ["root note", 3]],
+                        "related": ["atlas/one.md"],
+                        "topics": ["fixture notes", "root note"],
+                        "tldr": ["Fixture notes keep the reader honest"],
+                        "important": "Root note stays in the fixture",
+                        "next_action": "Open the other note",
+                        "rich": True,
+                    },
+                }),
+            )
+
+        page.route("**/api/memory/visit", handle_visit)
+        page.route("**/api/memory/enrich", lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"ok": True, "enriched": False}),
+        ))
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator(".nav-folder").first).to_be_visible()
+        toggle = page.locator("#memory-meta-toggle")
+        expect(toggle).to_be_visible()
+        expect(toggle).to_have_text("Meta")
+        expect(page.locator("#memory-meta")).to_be_hidden()
+        toggle.click()
+        expect(page.locator("#memory-meta")).to_be_visible()
+        expect(page.locator("#memory-meta-stats")).to_contain_text("words")
+        expect(page.locator("#memory-meta-stats")).to_contain_text("heading")
+        expect(page.locator(".cloud-word", has_text="fixture notes")).to_be_visible()
+        page.locator(".cloud-word", has_text="fixture notes").click()
+        expect(page.locator("#doc mark.kw-hit").first).to_be_visible()
+        expect(page.locator("#memory-sections")).to_contain_text("Fixture notes")
+        expect(page.locator("#memory-graph canvas")).to_be_visible()
+        page.locator("#ai-toggle").click()
+        expect(page.locator("#memory-cloud-title")).to_have_text("Word cloud · themes")
+        expect(page.locator(".cloud-topic").first).to_be_visible()
+        expect(page.locator("#memory-legend-rel")).to_have_text("Theme")
+        expect(page.locator(".section-block.is-hot")).to_be_visible()
+        toggle.click()
+        expect(page.locator("#memory-meta")).to_be_hidden()
+
     def test_ask_closes_on_a_note_that_was_never_used(self):
         chat_dir = FIXTURES / "_chats"
         chat_dir.mkdir(exist_ok=True)

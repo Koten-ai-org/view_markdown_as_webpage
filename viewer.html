@@ -87,7 +87,34 @@
           <div class="memory-cards" id="memory-cards" hidden></div>
           <div class="memory-keys" id="memory-keys"></div>
           <div class="memory-related" id="memory-related"></div>
-          <div class="memory-actions" id="memory-actions" hidden></div>
+          <div class="memory-toolbar">
+            <div class="memory-actions" id="memory-actions" hidden></div>
+            <button type="button" class="memory-action memory-meta-toggle" id="memory-meta-toggle" aria-expanded="false" aria-controls="memory-meta">Meta</button>
+          </div>
+          <div class="memory-meta" id="memory-meta" hidden>
+            <p class="memory-meta-stats" id="memory-meta-stats"></p>
+            <div class="memory-meta-grid">
+              <section class="memory-meta-pane">
+                <h3 id="memory-cloud-title">Word cloud</h3>
+                <div id="memory-cloud" class="memory-cloud"></div>
+              </section>
+              <section class="memory-meta-pane">
+                <h3>Links</h3>
+                <div id="memory-graph" class="memory-graph"></div>
+                <p class="memory-meta-legend" id="memory-graph-legend">
+                  <span class="lg lg-me">This note</span>
+                  <span class="lg lg-note">Note</span>
+                  <span class="lg lg-site">Site</span>
+                  <span class="lg lg-kw">Keyword</span>
+                  <span class="lg lg-rel" id="memory-legend-rel">Related</span>
+                </p>
+              </section>
+            </div>
+            <section class="memory-meta-pane">
+              <h3>Sections</h3>
+              <div id="memory-sections" class="memory-sections"></div>
+            </section>
+          </div>
           <div class="memory-ask-bar">
             <button type="button" class="chat-copy" id="memory-chat-copy" hidden aria-label="Copy chat" title="Copy chat">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

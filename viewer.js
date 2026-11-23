@@ -55,6 +55,10 @@
   let chatGen = 0;
   let lastChat = null;
   let askClosed = false;
+  let metaOpen = false;
+  let metaChart = null;
+  let metaGraphGen = 0;
+  let echartsPromise = null;
   let activeKeywords = [];
   const KEYWORD_COLORS = [
     "#f08a2a", "#f0b429", "#e2d04a", "#9fd36a",
@@ -885,6 +889,7 @@
         });
       }
       applyKeywordHighlights();
+      refreshMeta();
       requestAnimationFrame(function () {
         scrollToHash(hash);
       });
@@ -909,6 +914,7 @@
     clearKeywordHighlights();
     const el = document.getElementById("memory");
     if (el) el.hidden = true;
+    disposeMetaChart();
   }
 
   function stopCardStream() {
@@ -1281,6 +1287,404 @@
       if (copyBtn) copyBtn.hidden = true;
     }
     syncAskToggle();
+    syncMetaToggle();
+  }
+
+  function noteWordCount() {
+    const text = String((article && article.innerText) || "").replace(/\s+/g, " ").trim();
+    if (!text || text === "Loading…") return 0;
+    return text.split(" ").length;
+  }
+
+  function externalHosts() {
+    const seen = Object.create(null);
+    const out = [];
+    if (!article) return out;
+    article.querySelectorAll("a.link-ext[href]").forEach(function (a) {
+      let host = "";
+      try {
+        host = new URL(a.href).hostname.replace(/^www\./, "");
+      } catch (err) {
+        host = "";
+      }
+      if (!host || seen[host]) return;
+      seen[host] = true;
+      out.push(host);
+    });
+    return out;
+  }
+
+  function shortLabel(text, n) {
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (clean.length <= n) return clean;
+    return clean.slice(0, n - 1) + "…";
+  }
+
+  function syncMetaToggle() {
+    const btn = document.getElementById("memory-meta-toggle");
+    const panel = document.getElementById("memory-meta");
+    if (btn) btn.setAttribute("aria-expanded", metaOpen ? "true" : "false");
+    if (panel) panel.hidden = !metaOpen;
+  }
+
+  function disposeMetaChart() {
+    metaGraphGen += 1;
+    if (metaChart) {
+      metaChart.dispose();
+      metaChart = null;
+    }
+  }
+
+  function setMetaOpen(open) {
+    metaOpen = !!open;
+    syncMetaToggle();
+    if (!metaOpen) {
+      disposeMetaChart();
+      return;
+    }
+    refreshMeta();
+  }
+
+  function refreshMeta() {
+    if (!metaOpen) return;
+    const doc = (lastMemory && lastMemory.doc) || {};
+    renderMeta(doc);
+  }
+
+  function ensureEcharts() {
+    if (window.echarts) return Promise.resolve(window.echarts);
+    if (echartsPromise) return echartsPromise;
+    echartsPromise = new Promise(function (resolve, reject) {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js";
+      script.onload = function () {
+        if (window.echarts) resolve(window.echarts);
+        else reject(new Error("echarts missing"));
+      };
+      script.onerror = function () { reject(new Error("echarts failed")); };
+      document.head.appendChild(script);
+    });
+    return echartsPromise;
+  }
+
+  function topicForKeyword(term, topics) {
+    const parts = String(term || "").toLowerCase().split(/\s+/);
+    let best = "";
+    let score = 0;
+    (topics || []).forEach(function (topic) {
+      const raw = String(topic || "").toLowerCase();
+      const tp = raw.split(/\s+/);
+      let s = 0;
+      parts.forEach(function (part) {
+        if (!part) return;
+        if (tp.indexOf(part) !== -1) s += 2;
+        else if (raw.indexOf(part) !== -1) s += 1;
+      });
+      if (s > score) {
+        score = s;
+        best = String(topic);
+      }
+    });
+    return score ? best : "";
+  }
+
+  function bindCloudWord(btn, term) {
+    btn.classList.toggle("is-on", keywordIsOn(term));
+    btn.style.setProperty("--kw", keywordColor(term));
+    btn.addEventListener("click", function () {
+      setKeywordActive(term, !keywordIsOn(term));
+      const cloud = document.getElementById("memory-cloud");
+      if (!cloud) return;
+      cloud.querySelectorAll(".cloud-word").forEach(function (el) {
+        el.classList.toggle("is-on", keywordIsOn(el.getAttribute("data-term") || ""));
+      });
+    });
+  }
+
+  function renderCloud(doc) {
+    const host = document.getElementById("memory-cloud");
+    const title = document.getElementById("memory-cloud-title");
+    if (!host) return;
+    const words = (doc.keywords || []).slice(0, 18).filter(function (pair) {
+      return pair && pair[0];
+    });
+    const rich = !!(aiEnabled() && doc.rich);
+    const topics = rich ? (doc.topics || []).map(function (t) { return String(t || "").trim(); }).filter(Boolean) : [];
+    host.innerHTML = "";
+    host.classList.remove("is-grouped");
+    if (title) title.textContent = rich && topics.length ? "Word cloud · themes" : "Word cloud";
+    if (!words.length) {
+      host.innerHTML = '<p class="memory-empty">No repeated phrases in this note.</p>';
+      return;
+    }
+    const max = words.reduce(function (m, pair) { return Math.max(m, Number(pair[1]) || 1); }, 1);
+    if (topics.length) {
+      const groups = Object.create(null);
+      const order = [];
+      words.forEach(function (pair) {
+        const name = topicForKeyword(pair[0], topics) || "Other";
+        if (!groups[name]) {
+          groups[name] = [];
+          order.push(name);
+        }
+        groups[name].push(pair);
+      });
+      if (order.length > 1 || (order.length === 1 && order[0] !== "Other")) {
+        host.classList.add("is-grouped");
+        order.forEach(function (name) {
+          const group = document.createElement("div");
+          group.className = "cloud-group";
+          const label = document.createElement("p");
+          label.className = "cloud-topic";
+          label.textContent = name;
+          const line = document.createElement("div");
+          line.className = "cloud-line";
+          groups[name].forEach(function (pair) {
+            line.appendChild(cloudButton(pair, max));
+          });
+          group.appendChild(label);
+          group.appendChild(line);
+          host.appendChild(group);
+        });
+        return;
+      }
+    }
+    const placed = [];
+    const width = host.clientWidth || 320;
+    const height = host.clientHeight || 200;
+    words.forEach(function (pair, i) {
+      const btn = cloudButton(pair, max);
+      host.appendChild(btn);
+      const bw = btn.offsetWidth;
+      const bh = btn.offsetHeight;
+      let x = 8;
+      let y = 8 + i * 4;
+      let found = false;
+      const cx = width / 2;
+      const cy = height / 2;
+      for (let t = 0; t < 90 && !found; t++) {
+        const ang = t * 0.55;
+        const rad = 6 + t * 3.4;
+        x = cx + Math.cos(ang) * rad - bw / 2;
+        y = cy + Math.sin(ang) * rad - bh / 2;
+        if (x < 2 || y < 2 || x + bw > width - 2 || y + bh > height - 2) continue;
+        found = !placed.some(function (p) {
+          return x < p.x + p.w + 2 && x + bw + 2 > p.x && y < p.y + p.h + 2 && y + bh + 2 > p.y;
+        });
+      }
+      if (!found) {
+        x = 8;
+        y = 8 + (i % 6) * 28;
+      }
+      btn.style.left = Math.round(Math.max(2, x)) + "px";
+      btn.style.top = Math.round(Math.max(2, y)) + "px";
+      placed.push({ x: x, y: y, w: bw, h: bh });
+    });
+  }
+
+  function cloudButton(pair, max) {
+    const term = String(pair[0]);
+    const n = Number(pair[1]) || 1;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cloud-word";
+    btn.setAttribute("data-term", term);
+    btn.textContent = term;
+    btn.style.color = keywordColor(term);
+    btn.style.fontSize = (0.78 + (n / max) * 1.15).toFixed(2) + "rem";
+    btn.style.fontWeight = n / max > 0.55 ? "750" : "600";
+    bindCloudWord(btn, term);
+    return btn;
+  }
+
+  function renderSections(doc) {
+    const host = document.getElementById("memory-sections");
+    if (!host) return;
+    host.innerHTML = "";
+    const heads = article ? article.querySelectorAll("h1, h2, h3") : [];
+    if (!heads.length) {
+      host.innerHTML = '<p class="memory-empty">No headings in this note.</p>';
+      return;
+    }
+    const hot = aiEnabled() && doc.rich
+      ? [doc.important || "", doc.next_action || ""].concat(doc.tldr || []).join(" ").toLowerCase()
+      : "";
+    const blocks = [];
+    Array.prototype.forEach.call(heads, function (heading, i) {
+      let words = 0;
+      let node = heading.nextElementSibling;
+      const stop = heads[i + 1] || null;
+      while (node && node !== stop) {
+        const chunk = String(node.innerText || "").trim();
+        if (chunk) words += chunk.split(/\s+/).length;
+        node = node.nextElementSibling;
+      }
+      blocks.push({ heading: heading, words: Math.max(words, 1) });
+    });
+    const max = blocks.reduce(function (m, block) { return Math.max(m, block.words); }, 1);
+    blocks.forEach(function (block) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "section-block";
+      const title = String(block.heading.textContent || "").trim();
+      const tokens = title.toLowerCase().split(/\s+/).filter(function (part) { return part.length > 3; });
+      if (hot && tokens.some(function (part) { return hot.indexOf(part) !== -1; })) {
+        btn.classList.add("is-hot");
+      }
+      const bar = document.createElement("span");
+      bar.className = "section-bar";
+      bar.style.height = Math.round(18 + (block.words / max) * 78) + "px";
+      const label = document.createElement("span");
+      label.textContent = title;
+      btn.appendChild(bar);
+      btn.appendChild(label);
+      btn.addEventListener("click", function () {
+        if (block.heading.id) scrollToHash(block.heading.id);
+        else block.heading.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      host.appendChild(btn);
+    });
+  }
+
+  function graphNode(id, label, size, color, extra) {
+    const node = {
+      id: id,
+      name: shortLabel(label, 32),
+      symbolSize: size,
+      itemStyle: { color: color },
+    };
+    if (extra) {
+      Object.keys(extra).forEach(function (key) { node[key] = extra[key]; });
+    }
+    return node;
+  }
+
+  function paintGraph(doc) {
+    const host = document.getElementById("memory-graph");
+    const relLegend = document.getElementById("memory-legend-rel");
+    if (!host) return;
+    const gen = ++metaGraphGen;
+    if (metaChart) {
+      metaChart.dispose();
+      metaChart = null;
+    }
+    const rich = !!(aiEnabled() && doc.rich);
+    if (relLegend) relLegend.textContent = rich ? "Theme" : "Related";
+    const title = (doc.title || currentPath || "This note");
+    const nodes = [graphNode("me", title, 46, "#14202c", { kind: "me" })];
+    const links = [];
+    const seen = { me: true };
+    function add(id, label, size, color, kind, extra, dashed) {
+      if (seen[id]) return;
+      seen[id] = true;
+      nodes.push(graphNode(id, label, size, color, Object.assign({ kind: kind }, extra || {})));
+      links.push({
+        source: "me",
+        target: id,
+        lineStyle: {
+          color: color,
+          width: dashed ? 1.25 : 1.6,
+          type: dashed ? "dashed" : "solid",
+        },
+        label: dashed ? { show: true, formatter: rich ? "theme" : "related", fontSize: 10, color: "#3d5a4a" } : undefined,
+      });
+    }
+    (doc.links || []).slice(0, 10).forEach(function (path) {
+      const note = findNote(path);
+      add("note:" + path, (note && note.title) || path, 28, "#00b4e6", "note", { path: path }, false);
+    });
+    externalHosts().slice(0, 8).forEach(function (hostName) {
+      add("site:" + hostName, hostName, 22, "#8b9aab", "site", { href: "https://" + hostName }, false);
+    });
+    (doc.keywords || []).slice(0, 8).forEach(function (pair) {
+      if (!pair || !pair[0]) return;
+      const term = String(pair[0]);
+      add("kw:" + term.toLowerCase(), term, 16 + Math.min(14, Number(pair[1]) || 1), keywordColor(term), "keyword", { term: term }, false);
+    });
+    const linked = Object.create(null);
+    (doc.links || []).forEach(function (path) { linked[path] = true; });
+    (doc.related || []).slice(0, 6).forEach(function (path) {
+      if (linked[path]) return;
+      const note = findNote(path);
+      add("rel:" + path, (note && note.title) || path, 24, "#5cbc7a", "related", { path: path }, true);
+    });
+    if (nodes.length < 2) {
+      host.innerHTML = '<p class="memory-empty">No links or keywords in this note.</p>';
+      return;
+    }
+    host.innerHTML = "";
+    ensureEcharts().then(function (echarts) {
+      if (gen !== metaGraphGen || !metaOpen || !host.isConnected) return;
+      metaChart = echarts.init(host, null, { renderer: "canvas" });
+      metaChart.setOption({
+        animationDurationUpdate: 400,
+        tooltip: { show: false },
+        series: [{
+          type: "graph",
+          layout: "force",
+          roam: true,
+          draggable: true,
+          force: { repulsion: 240, edgeLength: [50, 130], gravity: 0.08 },
+          label: {
+            show: true,
+            position: "right",
+            color: "#14202c",
+            fontFamily: "Inter, sans-serif",
+            fontSize: 11,
+          },
+          lineStyle: { curveness: 0.14 },
+          emphasis: { focus: "adjacency" },
+          data: nodes,
+          links: links,
+        }],
+      });
+      metaChart.on("click", function (params) {
+        const data = params && params.data;
+        if (!data || params.dataType !== "node") return;
+        if (data.kind === "keyword" && data.term) {
+          setKeywordActive(data.term, !keywordIsOn(data.term));
+          const cloud = document.getElementById("memory-cloud");
+          if (cloud) {
+            cloud.querySelectorAll(".cloud-word").forEach(function (el) {
+              el.classList.toggle("is-on", keywordIsOn(el.getAttribute("data-term") || ""));
+            });
+          }
+          return;
+        }
+        if ((data.kind === "note" || data.kind === "related") && data.path) {
+          loadDoc(data.path, "", false);
+        }
+      });
+      requestAnimationFrame(function () {
+        if (metaChart) metaChart.resize();
+      });
+    }).catch(function () {
+      if (gen !== metaGraphGen) return;
+      host.innerHTML = '<p class="memory-empty">The link graph needs a network the first time.</p>';
+    });
+  }
+
+  function renderMeta(doc) {
+    const stats = document.getElementById("memory-meta-stats");
+    const words = noteWordCount();
+    const minutes = words ? Math.max(1, Math.round(words / 220)) : 0;
+    const headings = article ? article.querySelectorAll("h1, h2, h3").length : (doc.headings || []).length;
+    const notes = (doc.links || []).length;
+    const sites = externalHosts().length;
+    if (stats) {
+      const bits = [
+        words + " words",
+        minutes ? minutes + " min" : "0 min",
+        headings + (headings === 1 ? " heading" : " headings"),
+        notes + (notes === 1 ? " note" : " notes"),
+        sites + (sites === 1 ? " site" : " sites"),
+      ];
+      if (aiEnabled() && doc.rich) bits.push("AI themes");
+      stats.textContent = bits.join(" · ");
+    }
+    renderCloud(doc || {});
+    renderSections(doc || {});
+    paintGraph(doc || {});
   }
 
   function beginMemory() {
@@ -1358,6 +1762,7 @@
           }).join("")
         : "";
     }
+    refreshMeta();
   }
 
   async function syncMemory(path) {
@@ -1899,6 +2304,12 @@
         const btn = ev.target.closest("[data-preset]");
         if (!btn) return;
         sendChat(btn.getAttribute("data-preset"), "");
+      });
+    }
+    const metaBtn = document.getElementById("memory-meta-toggle");
+    if (metaBtn) {
+      metaBtn.addEventListener("click", function () {
+        setMetaOpen(!metaOpen);
       });
     }
     const askBtn = document.getElementById("memory-ask-toggle");
@@ -2526,6 +2937,7 @@
     applySavedRailWidth();
     if (peekEl && !peekEl.hidden && peekAnchor) placePeek(peekAnchor);
     if (selMenu && !selMenu.hidden) placeSelMenu();
+    if (metaChart) metaChart.resize();
   });
   window.addEventListener("scroll", function () {
     if (selMenu && !selMenu.hidden) hideSelMenu();

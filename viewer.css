@@ -592,6 +592,7 @@ body.rail-resizing * {
 .memory[hidden],
 .memory-cards[hidden],
 .memory-actions[hidden],
+.memory-meta[hidden],
 .memory-ask[hidden],
 .memory-ask-toggle[hidden],
 .chat-copy[hidden] {
@@ -664,12 +665,27 @@ body.rail-resizing * {
 @keyframes memory-caret {
   50% { opacity: 0; }
 }
-.memory-keys, .memory-related, .memory-actions {
+.memory-keys, .memory-related {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
   margin-top: 0.35rem;
 }
+.memory-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+}
+.memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+}
+.memory-actions[hidden] { display: none !important; }
 .memory-chip {
   font: 600 0.75rem var(--sans);
   color: #f4fbff;
@@ -703,6 +719,144 @@ button.memory-chip[data-keyword][aria-pressed="true"]:hover {
 .memory-action:hover {
   background: var(--cyan-soft);
   color: var(--cyan-dark);
+}
+.memory-meta-toggle[aria-expanded="true"] {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: #fff;
+}
+.memory-meta-toggle[aria-expanded="true"]:hover {
+  background: var(--cyan);
+  color: #fff;
+}
+.memory-meta {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(0, 153, 201, 0.22);
+}
+.memory-meta-stats {
+  margin: 0 0 0.65rem;
+  font: 600 0.78rem var(--sans);
+  color: #14202c;
+}
+.memory-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+.memory-meta-pane {
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(0, 153, 201, 0.16);
+  border-radius: 0.75rem;
+  padding: 0.6rem 0.7rem 0.7rem;
+}
+.memory-meta-pane h3 {
+  margin: 0 0 0.4rem;
+  font: 650 0.72rem var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.memory-meta > .memory-meta-pane { margin-top: 0.65rem; }
+.memory-cloud {
+  position: relative;
+  min-height: 12.5rem;
+}
+.memory-cloud.is-grouped { min-height: 0; }
+.cloud-word {
+  position: absolute;
+  border: 0;
+  background: transparent;
+  padding: 0.05rem 0.22rem;
+  cursor: pointer;
+  line-height: 1.05;
+  font-family: var(--sans);
+}
+.memory-cloud.is-grouped .cloud-word { position: static; }
+.cloud-word.is-on {
+  background: var(--kw);
+  color: #14202c !important;
+  border-radius: 0.3rem;
+}
+.cloud-group { margin: 0 0 0.45rem; }
+.cloud-group:last-child { margin-bottom: 0; }
+.cloud-topic {
+  margin: 0 0 0.15rem;
+  font: 700 0.68rem var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #14202c;
+}
+.cloud-line { display: flex; flex-wrap: wrap; gap: 0.15rem 0.35rem; }
+.memory-graph { height: 16rem; }
+.memory-meta-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.7rem;
+  margin: 0.35rem 0 0;
+  font: 600 0.68rem var(--sans);
+  color: #14202c;
+}
+.lg::before {
+  content: "";
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-right: 0.28rem;
+  border-radius: 999px;
+  vertical-align: -0.05rem;
+}
+.lg-me::before { background: #14202c; }
+.lg-note::before { background: #00b4e6; }
+.lg-site::before { background: #8b9aab; }
+.lg-kw::before { background: #f08a2a; }
+.lg-rel::before {
+  background: transparent;
+  border: 1.5px dashed #5cbc7a;
+  width: 0.7rem;
+  height: 0;
+  border-radius: 0;
+  vertical-align: 0.18rem;
+}
+.memory-sections {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  min-height: 7.5rem;
+  overflow-x: auto;
+  padding-top: 0.2rem;
+}
+.section-block {
+  flex: 1 1 0;
+  min-width: 4.6rem;
+  max-width: 9rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.28rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font: 600 0.68rem var(--sans);
+  color: #14202c;
+}
+.section-bar {
+  display: block;
+  width: 100%;
+  min-height: 0.35rem;
+  border-radius: 0.35rem 0.35rem 0.15rem 0.15rem;
+  background: rgba(0, 180, 230, 0.35);
+}
+.section-block.is-hot .section-bar { background: #00b4e6; }
+.section-block span:last-child {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.25;
 }
 mark.kw-hit {
   background: var(--kw);
@@ -1757,6 +1911,7 @@ mark.kw-hit {
   .folders-link { padding: 0.42rem 0.75rem; }
   .ai-toggle { padding: 0.38rem 0.75rem 0.38rem 0.62rem; }
   .memory-cards { grid-template-columns: 1fr; }
+  .memory-meta-grid { grid-template-columns: 1fr; }
   .progress { left: 0; }
   .rail {
     position: fixed;

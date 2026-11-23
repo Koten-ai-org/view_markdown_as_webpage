@@ -16,6 +16,7 @@ python3 serve.py --version
 ## Unreleased
 
 - Ask stays closed on a note that has never been used. Opening a note that already has a thread opens the chat. Switching files no longer keeps the previous note's text box open.
+- **Meta**, after Actions, opens a stats line, word cloud, link graph, and section map. Offline uses the note's own keywords and links. With AI on and a filled pack, the cloud groups into themes, related notes draw as dashed theme links, and sections named in the cards are tinted.
 
 ---
 
