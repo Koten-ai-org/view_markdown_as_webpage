@@ -648,11 +648,13 @@ class ViewerFoldTests(unittest.TestCase):
         expect(page.locator("#memory-actions .memory-action").first).to_be_visible()
         place = page.evaluate(
             """() => {
+              const label = document.getElementById("memory-actions-label").getBoundingClientRect();
               const meta = document.getElementById("memory-meta-toggle").getBoundingClientRect();
               const action = document.querySelector("#memory-actions .memory-action").getBoundingClientRect();
-              return { meta: meta.left, action: action.left };
+              return { label: label.left, meta: meta.left, action: action.left };
             }"""
         )
+        self.assertLess(place["label"], place["meta"])
         self.assertLess(place["meta"], place["action"])
         expect(page.locator("#memory-cloud-title")).to_have_text("Word cloud")
         expect(page.locator("#memory-cloud")).to_have_attribute("data-packed", "1")

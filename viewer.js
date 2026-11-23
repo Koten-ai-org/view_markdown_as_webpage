@@ -1273,16 +1273,14 @@
     const askBtn = document.getElementById("memory-ask-toggle");
     const on = aiEnabled();
     if (el) {
-      el.hidden = !on;
-      if (on) {
-        const chips = (aiPrompts || []).filter(function (p) {
-          return p && p.id && p.id !== "ask";
-        }).map(function (p) {
-          return '<button type="button" class="memory-action" data-preset="' +
-            escapeHtml(p.id) + '">' + escapeHtml(p.label || p.id) + "</button>";
-        }).join("");
-        el.innerHTML = chips ? '<span class="memory-label">Actions</span>' + chips : "";
-      }
+      const chips = on ? (aiPrompts || []).filter(function (p) {
+        return p && p.id && p.id !== "ask";
+      }).map(function (p) {
+        return '<button type="button" class="memory-action" data-preset="' +
+          escapeHtml(p.id) + '">' + escapeHtml(p.label || p.id) + "</button>";
+      }).join("") : "";
+      el.hidden = !chips;
+      el.innerHTML = chips;
     }
     if (askBtn) askBtn.hidden = !on;
     if (!on) {
