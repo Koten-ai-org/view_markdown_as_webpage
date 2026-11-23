@@ -32,4 +32,4 @@ Windows (PowerShell, Python 3.11):
 
 GitHub Actions workflow `.github/workflows/desktop.yml` builds both on `v*` tags or **Run workflow**.
 
-Icons are regenerated with `packaging/.venv/bin/python packaging/make_icons.py` (navy square, cyan inner tile, **Md**).
+Icons are regenerated with `packaging/.venv/bin/python packaging/make_icons.py` (rounded cyan mark, white **Md**, transparent corners).

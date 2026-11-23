@@ -11,9 +11,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = Path(__file__).resolve().parent / "icons"
-NAVY = (28, 39, 51, 255)
 CYAN = (0, 180, 230, 255)
 WHITE = (255, 255, 255, 255)
+# Matches the rounded macOS icon shape. Corners outside this stay transparent.
+SQUIRCLE_RADIUS = 0.2237
 FONTS = (
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -32,13 +33,12 @@ def pick_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 
 def draw_mark(size: int) -> Image.Image:
-    img = Image.new("RGBA", (size, size), NAVY)
+    """One rounded mark. Transparent corners, so the Dock does not show a square."""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    inset = int(size * 0.18)
-    radius = int(size * 0.14)
-    box = (inset, inset, size - inset, size - inset)
-    draw.rounded_rectangle(box, radius=radius, fill=CYAN)
-    font = pick_font(max(12, int(size * 0.38)))
+    radius = max(1, int(round(size * SQUIRCLE_RADIUS)))
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=CYAN)
+    font = pick_font(max(12, int(size * 0.46)))
     text = "Md"
     x0, y0, x1, y1 = draw.textbbox((0, 0), text, font=font)
     tw, th = x1 - x0, y1 - y0
