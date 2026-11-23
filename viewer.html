@@ -26,6 +26,10 @@
       </label>
       <div class="rail-notes">
         <div class="rail-tools">
+          <div class="nav-label-switch" role="group" aria-label="Note labels">
+            <button type="button" id="nav-label-title" aria-pressed="true" title="Show the markdown heading"># Title</button>
+            <button type="button" id="nav-label-file" aria-pressed="false" title="Show the real file name">File name</button>
+          </div>
           <button type="button" class="nav-all" id="nav-all" hidden>Hide all</button>
         </div>
         <div id="nav-list" class="rail-list"></div>
@@ -83,7 +87,44 @@
           <div class="memory-cards" id="memory-cards" hidden></div>
           <div class="memory-keys" id="memory-keys"></div>
           <div class="memory-related" id="memory-related"></div>
-          <div class="memory-actions" id="memory-actions" hidden></div>
+          <div class="memory-toolbar">
+            <span class="memory-label" id="memory-actions-label">Actions</span>
+            <button type="button" class="memory-action memory-meta-toggle" id="memory-meta-toggle" aria-expanded="false" aria-controls="memory-meta">Meta</button>
+            <div class="memory-actions" id="memory-actions" hidden></div>
+          </div>
+          <div class="memory-meta" id="memory-meta" hidden>
+            <p class="memory-meta-stats" id="memory-meta-stats"></p>
+            <div class="memory-meta-grid">
+              <section class="memory-meta-pane">
+                <h3 id="memory-cloud-title">Word cloud</h3>
+                <div id="memory-cloud" class="memory-cloud"></div>
+              </section>
+              <section class="memory-meta-pane memory-graph-pane">
+                <div class="memory-pane-head">
+                  <h3>Ideas</h3>
+                  <div class="memory-graph-tools" role="group" aria-label="Graph view">
+                    <button type="button" id="memory-graph-home" title="Fit the graph and clear the selection">Home</button>
+                    <button type="button" id="memory-graph-out" title="Zoom out">−</button>
+                    <button type="button" id="memory-graph-in" title="Zoom in">+</button>
+                    <button type="button" id="memory-graph-expand" aria-pressed="false" title="Use the full width of the strip">Enlarge</button>
+                  </div>
+                </div>
+                <div id="memory-graph" class="memory-graph"></div>
+                <p class="memory-meta-legend" id="memory-graph-legend">
+                  <span class="lg lg-me">This note</span>
+                  <span class="lg lg-idea">(Idea)</span>
+                  <span class="lg lg-kw">Keyword</span>
+                  <span class="lg lg-note">Local note</span>
+                  <span class="lg lg-file">Local file</span>
+                  <span class="lg lg-ext">External</span>
+                </p>
+              </section>
+            </div>
+            <section class="memory-meta-pane">
+              <h3>Sections</h3>
+              <div id="memory-sections" class="memory-sections"></div>
+            </section>
+          </div>
           <div class="memory-ask-bar">
             <button type="button" class="chat-copy" id="memory-chat-copy" hidden aria-label="Copy chat" title="Copy chat">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

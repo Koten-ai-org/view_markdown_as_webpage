@@ -29,6 +29,7 @@
   const FOLD_KEY = "mdview-fold";
   const RAIL_W_KEY = "mdview-rail-w";
   const AI_ON_KEY = "mdview-ai";
+  const LABEL_KEY = "mdview-nav-label";
   const RAIL_MIN = 180;
   const resizeHandle = document.getElementById("rail-resize");
 
@@ -54,6 +55,15 @@
   let chatGen = 0;
   let lastChat = null;
   let askClosed = false;
+  let metaOpen = false;
+  let metaWide = false;
+  let metaFocus = null;
+  let metaIdeas = [];
+  let metaGraphModel = null;
+  let metaChart = null;
+  let metaGraphGen = 0;
+  let metaResizeTimer = 0;
+  let echartsPromise = null;
   let activeKeywords = [];
   const KEYWORD_COLORS = [
     "#f08a2a", "#f0b429", "#e2d04a", "#9fd36a",
@@ -63,6 +73,7 @@
   ];
 
   function keywordColor(term) {
+    // The same trimmed lowercase string always lands on the same palette color.
     const s = String(term || "").trim().toLowerCase();
     let h = 2166136261;
     for (let i = 0; i < s.length; i++) {
@@ -884,6 +895,7 @@
         });
       }
       applyKeywordHighlights();
+      refreshMeta();
       requestAnimationFrame(function () {
         scrollToHash(hash);
       });
@@ -908,6 +920,7 @@
     clearKeywordHighlights();
     const el = document.getElementById("memory");
     if (el) el.hidden = true;
+    disposeMetaChart();
   }
 
   function stopCardStream() {
@@ -1261,16 +1274,14 @@
     const askBtn = document.getElementById("memory-ask-toggle");
     const on = aiEnabled();
     if (el) {
-      el.hidden = !on;
-      if (on) {
-        const chips = (aiPrompts || []).filter(function (p) {
-          return p && p.id && p.id !== "ask";
-        }).map(function (p) {
-          return '<button type="button" class="memory-action" data-preset="' +
-            escapeHtml(p.id) + '">' + escapeHtml(p.label || p.id) + "</button>";
-        }).join("");
-        el.innerHTML = chips ? '<span class="memory-label">Actions</span>' + chips : "";
-      }
+      const chips = on ? (aiPrompts || []).filter(function (p) {
+        return p && p.id && p.id !== "ask";
+      }).map(function (p) {
+        return '<button type="button" class="memory-action" data-preset="' +
+          escapeHtml(p.id) + '">' + escapeHtml(p.label || p.id) + "</button>";
+      }).join("") : "";
+      el.hidden = !chips;
+      el.innerHTML = chips;
     }
     if (askBtn) askBtn.hidden = !on;
     if (!on) {
@@ -1280,6 +1291,1273 @@
       if (copyBtn) copyBtn.hidden = true;
     }
     syncAskToggle();
+    syncMetaToggle();
+  }
+
+  function noteWordCount() {
+    const text = String((article && article.innerText) || "").replace(/\s+/g, " ").trim();
+    if (!text || text === "Loading…") return 0;
+    return text.split(" ").length;
+  }
+
+  function externalHosts() {
+    const seen = Object.create(null);
+    const out = [];
+    if (!article) return out;
+    article.querySelectorAll("a.link-ext[href]").forEach(function (a) {
+      let host = "";
+      try {
+        host = new URL(a.href).hostname.replace(/^www\./, "");
+      } catch (err) {
+        host = "";
+      }
+      if (!host || seen[host]) return;
+      seen[host] = true;
+      out.push(host);
+    });
+    return out;
+  }
+
+  function shortLabel(text, n) {
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (clean.length <= n) return clean;
+    return clean.slice(0, n - 1) + "…";
+  }
+
+  function syncMetaToggle() {
+    const btn = document.getElementById("memory-meta-toggle");
+    const panel = document.getElementById("memory-meta");
+    if (btn) btn.setAttribute("aria-expanded", metaOpen ? "true" : "false");
+    if (panel) panel.hidden = !metaOpen;
+  }
+
+  function disposeMetaChart() {
+    metaGraphGen += 1;
+    if (metaChart) {
+      metaChart.dispose();
+      metaChart = null;
+    }
+  }
+
+  function setMetaOpen(open) {
+    metaOpen = !!open;
+    syncMetaToggle();
+    if (!metaOpen) {
+      disposeMetaChart();
+      return;
+    }
+    refreshMeta();
+  }
+
+  function refreshMeta() {
+    if (!metaOpen) return;
+    const doc = (lastMemory && lastMemory.doc) || {};
+    renderMeta(doc);
+  }
+
+  function ensureEcharts() {
+    if (window.echarts) return Promise.resolve(window.echarts);
+    if (echartsPromise) return echartsPromise;
+    echartsPromise = new Promise(function (resolve, reject) {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js";
+      script.onload = function () {
+        if (window.echarts) resolve(window.echarts);
+        else reject(new Error("echarts missing"));
+      };
+      script.onerror = function () { reject(new Error("echarts failed")); };
+      document.head.appendChild(script);
+    });
+    return echartsPromise;
+  }
+
+  function topicForKeyword(term, topics) {
+    const parts = String(term || "").toLowerCase().split(/\s+/);
+    let best = "";
+    let score = 0;
+    (topics || []).forEach(function (topic) {
+      const raw = String(topic || "").toLowerCase();
+      const tp = raw.split(/\s+/);
+      let s = 0;
+      parts.forEach(function (part) {
+        if (!part) return;
+        if (tp.indexOf(part) !== -1) s += 2;
+        else if (raw.indexOf(part) !== -1) s += 1;
+      });
+      if (s > score) {
+        score = s;
+        best = String(topic);
+      }
+    });
+    return score ? best : "";
+  }
+
+  function bindCloudWord(btn) {
+    btn.style.setProperty("--kw", btn.style.color || keywordColor(btn.getAttribute("data-term")));
+    btn.addEventListener("click", function () {
+      if (btn.getAttribute("data-kind") === "idea") selectIdea(btn.getAttribute("data-idea") || "");
+      else selectKeyword(btn.getAttribute("data-term") || "");
+    });
+  }
+
+  const CLOUD_STOP = {
+    the: 1, and: 1, for: 1, that: 1, with: 1, this: 1, from: 1, have: 1, were: 1,
+    been: 1, they: 1, their: 1, what: 1, when: 1, where: 1, which: 1, will: 1,
+    your: 1, about: 1, into: 1, than: 1, then: 1, them: 1, these: 1, those: 1,
+    there: 1, here: 1, also: 1, just: 1, only: 1, more: 1, some: 1, such: 1,
+    other: 1, over: 1, after: 1, before: 1, because: 1, while: 1, would: 1,
+    could: 1, should: 1, each: 1, very: 1, much: 1, many: 1, most: 1, same: 1,
+    within: 1, without: 1, between: 1, through: 1, note: 1, notes: 1,
+  };
+
+  function prepareCloudWords(doc) {
+    const words = [];
+    const seen = Object.create(null);
+    (doc.keywords || []).forEach(function (pair) {
+      if (!pair || !pair[0]) return;
+      const term = String(pair[0]).trim();
+      const key = term.toLowerCase();
+      if (!term || seen[key]) return;
+      seen[key] = true;
+      words.push([term, Number(pair[1]) || 1]);
+    });
+    words.sort(function (a, b) { return b[1] - a[1]; });
+    const maxWeight = words.length ? words[0][1] : 1;
+    if (words.length && words.length < 12) {
+      cloudFillers(words, maxWeight).forEach(function (pair) {
+        const key = String(pair[0]).toLowerCase();
+        if (seen[key]) return;
+        seen[key] = true;
+        words.push(pair);
+      });
+      words.sort(function (a, b) { return b[1] - a[1]; });
+    }
+    return words.slice(0, 26);
+  }
+
+  function cloudFillers(existing, maxWeight) {
+    if (!article) return [];
+    const used = Object.create(null);
+    existing.forEach(function (pair) {
+      String(pair[0] || "").toLowerCase().split(/\s+/).forEach(function (part) {
+        if (part) used[part] = true;
+      });
+    });
+    const counts = Object.create(null);
+    String(article.innerText || "").toLowerCase().split(/[^a-z0-9]+/).forEach(function (tok) {
+      if (tok.length < 4 || CLOUD_STOP[tok] || used[tok]) return;
+      counts[tok] = (counts[tok] || 0) + 1;
+    });
+    const ranked = Object.keys(counts).filter(function (tok) { return counts[tok] >= 3; });
+    ranked.sort(function (a, b) { return counts[b] - counts[a]; });
+    const top = ranked.length ? counts[ranked[0]] : 1;
+    const cap = Math.max(1, maxWeight * 0.5);
+    return ranked.slice(0, 14).map(function (tok) {
+      return [tok, Math.max(1, Math.round((counts[tok] / top) * cap))];
+    });
+  }
+
+  function cloudUpright(term, index) {
+    if (index === 0) return false;
+    const text = String(term || "");
+    if (text.length > 14 || text.split(/\s+/).length > 2) return false;
+    let h = 0;
+    for (let i = 0; i < text.length; i++) h = (h * 33 + text.charCodeAt(i)) >>> 0;
+    return (h % 3) === 0;
+  }
+
+  function cloudFontPx(count, max, bigPx) {
+    const t = Math.pow((Number(count) || 1) / (max || 1), 0.62);
+    return Math.round(13 + t * bigPx);
+  }
+
+  function shrinkCloudWord(btn, limit) {
+    let size = parseFloat(btn.style.fontSize) || 16;
+    let guard = 0;
+    while (btn.offsetWidth > limit && size > 13 && guard < 10) {
+      size = Math.max(13, size * 0.86);
+      btn.style.fontSize = Math.round(size) + "px";
+      guard += 1;
+    }
+  }
+
+  function cloudSpot(box, placed, width, height) {
+    const cx = width / 2;
+    const cy = height / 2;
+    const pad = 2;
+    for (let t = 0; t < 780; t++) {
+      const ang = t * 0.45;
+      const rad = t / 780;
+      const x = cx + Math.cos(ang) * rad * (width * 0.48) - box.w / 2;
+      const y = cy + Math.sin(ang) * rad * (height * 0.46) - box.h / 2;
+      if (x < 1 || y < 1 || x + box.w > width - 1 || y + box.h > height - 1) continue;
+      const hit = placed.some(function (p) {
+        return x < p.x + p.w + pad && x + box.w + pad > p.x && y < p.y + p.h + pad && y + box.h + pad > p.y;
+      });
+      if (!hit) return { x: x, y: y };
+    }
+    return null;
+  }
+
+  function cloudCoverage(packed) {
+    const placed = packed.placed;
+    if (!placed.length) return 0;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = 0;
+    let maxY = 0;
+    placed.forEach(function (p) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + p.w);
+      maxY = Math.max(maxY, p.y + p.h);
+    });
+    return Math.min((maxX - minX) / packed.width, (maxY - minY) / packed.height);
+  }
+
+  function packCloud(host, words, scale) {
+    host.innerHTML = "";
+    const width = host.clientWidth || 480;
+    const height = host.clientHeight || 288;
+    const max = words.reduce(function (m, pair) { return Math.max(m, Number(pair[1]) || 1); }, 1);
+    const bigPx = Math.min(68 * scale, Math.min(width, height) * 0.26 * scale);
+    const placed = [];
+    let skipped = 0;
+    words.forEach(function (pair, i) {
+      const btn = cloudButton(pair, max, bigPx);
+      const upright = cloudUpright(pair[0], i);
+      if (upright) btn.classList.add("is-up");
+      host.appendChild(btn);
+      shrinkCloudWord(btn, upright ? height * 0.72 : width * 0.9);
+      function measure() {
+        const bw = btn.offsetWidth;
+        const bh = btn.offsetHeight;
+        const turned = btn.classList.contains("is-up");
+        return {
+          bw: bw,
+          bh: bh,
+          box: turned ? { w: bh, h: bw } : { w: bw, h: bh },
+        };
+      }
+      let measured = measure();
+      let spot = null;
+      if (i === 0) {
+        spot = {
+          x: Math.max(2, Math.min((width - measured.box.w) / 2, width - measured.box.w - 2)),
+          y: Math.max(2, Math.min((height - measured.box.h) / 2, height - measured.box.h - 2)),
+        };
+      } else {
+        spot = cloudSpot(measured.box, placed, width, height);
+        let size = parseFloat(btn.style.fontSize) || 16;
+        let guard = 0;
+        while (!spot && size > 15 && guard < 6) {
+          size = Math.max(15, size * 0.8);
+          btn.style.fontSize = Math.round(size) + "px";
+          measured = measure();
+          spot = cloudSpot(measured.box, placed, width, height);
+          guard += 1;
+        }
+        if (!spot && !btn.classList.contains("is-up") && String(pair[0]).length <= 16) {
+          btn.classList.add("is-up");
+          measured = measure();
+          spot = cloudSpot(measured.box, placed, width, height);
+        }
+      }
+      if (!spot) {
+        btn.remove();
+        skipped += 1;
+        return;
+      }
+      const left = btn.classList.contains("is-up") ? spot.x + measured.box.w / 2 - measured.bw / 2 : spot.x;
+      const top = btn.classList.contains("is-up") ? spot.y + measured.box.h / 2 - measured.bh / 2 : spot.y;
+      btn.style.left = Math.round(left) + "px";
+      btn.style.top = Math.round(top) + "px";
+      placed.push({ x: spot.x, y: spot.y, w: measured.box.w, h: measured.box.h });
+    });
+    return { placed: placed, skipped: skipped, width: width, height: height };
+  }
+
+  function ideaCloudRows() {
+    const rows = [];
+    const seen = Object.create(null);
+    (metaIdeas || []).forEach(function (idea) {
+      const only = idea.keywords.length === 1 && idea.keywords[0].term.toLowerCase() === idea.name.toLowerCase();
+      if (!only && !seen[idea.name.toLowerCase()]) {
+        seen[idea.name.toLowerCase()] = true;
+        const row = [idea.name, Math.max(idea.weight, 1)];
+        row.kind = "idea";
+        row.idea = idea.name;
+        row.term = idea.name;
+        row.color = keywordColor(idea.name);
+        rows.push(row);
+      }
+      idea.keywords.forEach(function (kw) {
+        const key = kw.term.toLowerCase();
+        if (seen[key]) return;
+        seen[key] = true;
+        const row = [kw.term, kw.count];
+        row.kind = "keyword";
+        row.idea = idea.name;
+        row.term = kw.term;
+        row.color = keywordColor(kw.term);
+        rows.push(row);
+      });
+    });
+    rows.sort(function (a, b) { return b[1] - a[1]; });
+    if (rows.length && rows.length < 12) {
+      cloudFillers(rows, rows[0][1]).forEach(function (pair) {
+        const key = String(pair[0]).toLowerCase();
+        if (seen[key]) return;
+        seen[key] = true;
+        const row = [pair[0], pair[1]];
+        row.kind = "keyword";
+        row.idea = pair[0];
+        row.term = pair[0];
+        row.color = keywordColor(pair[0]);
+        rows.push(row);
+      });
+      rows.sort(function (a, b) { return b[1] - a[1]; });
+    }
+    return rows.slice(0, 26);
+  }
+
+  function renderCloud(doc) {
+    const host = document.getElementById("memory-cloud");
+    const title = document.getElementById("memory-cloud-title");
+    if (!host) return;
+    if (title) title.textContent = "Word cloud";
+    host.classList.remove("is-grouped");
+    const words = metaIdeas && metaIdeas.length ? ideaCloudRows() : prepareCloudWords(doc || {});
+    if (!words.length) {
+      host.removeAttribute("data-packed");
+      host.innerHTML = '<p class="memory-empty">No repeated phrases in this note.</p>';
+      return;
+    }
+    const first = packCloud(host, words, 1);
+    const fill = cloudCoverage(first);
+    if (fill < 0.68 && first.skipped < words.length * 0.4) {
+      const again = packCloud(host, words, 1.24);
+      const better = cloudCoverage(again) > fill && again.placed.length + 1 >= first.placed.length;
+      if (!better) packCloud(host, words, 1);
+    }
+    host.setAttribute("data-packed", "1");
+    syncCloudFocus();
+  }
+
+  function cloudButton(pair, max, bigPx) {
+    const term = String(pair[0]);
+    const n = Number(pair[1]) || 1;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cloud-word";
+    btn.setAttribute("data-term", pair.term || term);
+    btn.setAttribute("data-idea", pair.idea || term);
+    btn.setAttribute("data-kind", pair.kind || "keyword");
+    btn.textContent = pair.kind === "idea" ? "(" + term + ")" : term;
+    const color = keywordColor(pair.term || term);
+    btn.setAttribute("data-color", color);
+    btn.style.color = color;
+    btn.style.fontSize = cloudFontPx(n, max, bigPx) + "px";
+    btn.style.fontWeight = pair.kind === "idea" || n / max > 0.45 ? "700" : "600";
+    bindCloudWord(btn);
+    return btn;
+  }
+
+  function headingTitle(heading) {
+    const clone = heading.cloneNode(true);
+    clone.querySelectorAll(".h-anchor").forEach(function (el) { el.remove(); });
+    return String(clone.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  function headingLevel(heading) {
+    return Number(String(heading.tagName || "").replace(/\D/g, "")) || 6;
+  }
+
+  function sectionSlice(heading, nested) {
+    const stopLevel = nested ? headingLevel(heading) : 6;
+    const parts = [];
+    let words = 0;
+    let node = heading.nextElementSibling;
+    while (node) {
+      if (/^H[1-6]$/.test(node.tagName) && headingLevel(node) <= stopLevel) break;
+      if (!node.classList || !node.classList.contains("toc")) {
+        const chunk = String(node.innerText || "").replace(/\s+/g, " ").trim();
+        if (chunk) {
+          parts.push(chunk);
+          words += chunk.split(" ").length;
+        }
+      }
+      node = node.nextElementSibling;
+    }
+    return { words: words, text: parts.join("\n") };
+  }
+
+  function countTerm(text, term) {
+    const re = keywordPattern(term);
+    if (!re || !text) return 0;
+    const found = String(text).match(re);
+    return found ? found.length : 0;
+  }
+
+  function sectionPhraseHits(text) {
+    const hits = [];
+    (metaIdeas || []).forEach(function (idea) {
+      let total = 0;
+      const terms = [];
+      idea.keywords.forEach(function (kw) {
+        const n = countTerm(text, kw.term);
+        if (!n) return;
+        total += n;
+        terms.push({ term: kw.term, count: n });
+      });
+      const named = idea.keywords.some(function (kw) {
+        return kw.term.toLowerCase() === idea.name.toLowerCase();
+      });
+      if (!named) {
+        const n = countTerm(text, idea.name);
+        if (n) {
+          total += n;
+          terms.push({ term: idea.name, count: n });
+        }
+      }
+      if (!total) return;
+      hits.push({ name: idea.name, color: idea.color, count: total, terms: terms });
+    });
+    hits.sort(function (a, b) { return b.count - a.count; });
+    return hits;
+  }
+
+  function sectionHitLabel(hit) {
+    const only = hit.terms.length === 1 && hit.terms[0].term.toLowerCase() === hit.name.toLowerCase();
+    return (only ? hit.name : "(" + hit.name + ")") + " · " + hit.count;
+  }
+
+  let sectionTipTimer = 0;
+
+  function sectionTipEl() {
+    let tip = document.getElementById("section-tip");
+    if (tip) return tip;
+    tip = document.createElement("div");
+    tip.id = "section-tip";
+    tip.className = "section-tip";
+    tip.hidden = true;
+    tip.addEventListener("mouseenter", function () { clearTimeout(sectionTipTimer); });
+    tip.addEventListener("mouseleave", scheduleHideSectionTip);
+    document.body.appendChild(tip);
+    return tip;
+  }
+
+  function hideSectionTip() {
+    clearTimeout(sectionTipTimer);
+    const tip = document.getElementById("section-tip");
+    if (tip) tip.hidden = true;
+  }
+
+  function scheduleHideSectionTip() {
+    clearTimeout(sectionTipTimer);
+    sectionTipTimer = setTimeout(hideSectionTip, 160);
+  }
+
+  function showSectionTip(block, title, words, hits) {
+    const tip = sectionTipEl();
+    clearTimeout(sectionTipTimer);
+    const lines = ['<p class="section-tip-title">' + escapeHtml(title) + "</p>"];
+    lines.push('<p class="section-tip-count">' + words + (words === 1 ? " word" : " words") + "</p>");
+    if (!hits.length) {
+      lines.push('<p class="section-tip-empty">No tracked phrases in this section.</p>');
+    } else {
+      hits.slice(0, 8).forEach(function (hit) {
+        lines.push(
+          '<p class="section-tip-hit" style="--kw:' + hit.color + '">' + escapeHtml(sectionHitLabel(hit)) + "</p>"
+        );
+        if (hit.terms.length > 1 || hit.terms[0].term.toLowerCase() !== hit.name.toLowerCase()) {
+          hit.terms.slice(0, 4).forEach(function (term) {
+            if (term.term.toLowerCase() === hit.name.toLowerCase()) return;
+            lines.push(
+              '<p class="section-tip-term">' + escapeHtml(term.term) + " · " + term.count + "</p>"
+            );
+          });
+        }
+      });
+    }
+    tip.innerHTML = lines.join("");
+    tip.hidden = false;
+    const rect = block.getBoundingClientRect();
+    const width = tip.offsetWidth;
+    const height = tip.offsetHeight;
+    let left = rect.left;
+    let top = rect.top - height - 8;
+    if (top < 8) top = rect.bottom + 8;
+    if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8;
+    tip.style.left = Math.max(8, left) + "px";
+    tip.style.top = top + "px";
+  }
+
+  function syncSectionFocus() {
+    const host = document.getElementById("memory-sections");
+    if (!host) return;
+    host.querySelectorAll(".section-block").forEach(function (el) {
+      const ideas = (el.getAttribute("data-ideas") || "").split("|").filter(Boolean);
+      const terms = (el.getAttribute("data-terms") || "").split("|").filter(Boolean);
+      let lit = !metaFocus;
+      if (metaFocus && metaFocus.kind === "idea") {
+        lit = ideas.indexOf(String(metaFocus.name || "").toLowerCase()) !== -1;
+      } else if (metaFocus && metaFocus.kind === "keyword") {
+        const term = String(metaFocus.term || "").toLowerCase();
+        const idea = String(metaFocus.idea || "").toLowerCase();
+        lit = terms.indexOf(term) !== -1 || (idea && ideas.indexOf(idea) !== -1);
+      }
+      el.classList.toggle("is-dim", !!metaFocus && !lit);
+      el.classList.toggle("is-on", !!metaFocus && lit);
+    });
+  }
+
+  function renderSections(doc) {
+    const host = document.getElementById("memory-sections");
+    if (!host) return;
+    hideSectionTip();
+    host.innerHTML = "";
+    const heads = article ? article.querySelectorAll("h1, h2, h3") : [];
+    if (!heads.length) {
+      host.innerHTML = '<p class="memory-empty">No headings in this note.</p>';
+      return;
+    }
+    const hot = aiEnabled() && doc.rich
+      ? [doc.important || "", doc.next_action || ""].concat(doc.tldr || []).join(" ").toLowerCase()
+      : "";
+    const blocks = [];
+    Array.prototype.forEach.call(heads, function (heading, i) {
+      const title = headingTitle(heading);
+      const direct = sectionSlice(heading, false);
+      const nested = direct.words ? direct : sectionSlice(heading, true);
+      const hits = sectionPhraseHits(title + "\n" + nested.text);
+      blocks.push({ heading: heading, title: title, words: nested.words, hits: hits });
+    });
+    const max = blocks.reduce(function (m, block) { return Math.max(m, block.words); }, 1);
+    blocks.forEach(function (block) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "section-block";
+      const title = block.title || "Section";
+      const tokens = title.toLowerCase().split(/\s+/).filter(function (part) { return part.length > 3; });
+      if (hot && tokens.some(function (part) { return hot.indexOf(part) !== -1; })) {
+        btn.classList.add("is-hot");
+      }
+      const ideaNames = [];
+      const termNames = [];
+      block.hits.forEach(function (hit) {
+        ideaNames.push(hit.name.toLowerCase());
+        hit.terms.forEach(function (term) { termNames.push(term.term.toLowerCase()); });
+      });
+      btn.setAttribute("data-ideas", ideaNames.join("|"));
+      btn.setAttribute("data-terms", termNames.join("|"));
+      btn.setAttribute("aria-label", title + ", " + block.words + (block.words === 1 ? " word" : " words"));
+      const bar = document.createElement("span");
+      bar.className = "section-bar";
+      const scale = max ? block.words / max : 0;
+      bar.style.height = Math.round(18 + scale * 78) + "px";
+      if (block.hits.length) {
+        bar.style.background = block.hits[0].color;
+      }
+      const count = document.createElement("span");
+      count.className = "section-count";
+      count.textContent = String(block.words);
+      bar.appendChild(count);
+      const label = document.createElement("span");
+      label.className = "section-label";
+      label.textContent = title;
+      btn.appendChild(bar);
+      btn.appendChild(label);
+      if (block.hits.length) {
+        const pick = document.createElement("span");
+        pick.className = "section-pick";
+        pick.style.setProperty("--kw", block.hits[0].color);
+        pick.textContent = sectionHitLabel(block.hits[0]);
+        pick.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const hit = block.hits[0];
+          const only = hit.terms.length === 1 && hit.terms[0].term.toLowerCase() === hit.name.toLowerCase();
+          if (only) selectKeyword(hit.terms[0].term);
+          else selectIdea(hit.name);
+        });
+        btn.appendChild(pick);
+      }
+      btn.addEventListener("mouseenter", function () {
+        showSectionTip(btn, title, block.words, block.hits);
+      });
+      btn.addEventListener("mouseleave", scheduleHideSectionTip);
+      btn.addEventListener("focus", function () {
+        showSectionTip(btn, title, block.words, block.hits);
+      });
+      btn.addEventListener("blur", scheduleHideSectionTip);
+      btn.addEventListener("click", function () {
+        hideSectionTip();
+        if (block.heading.id) scrollToHash(block.heading.id);
+        else block.heading.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      host.appendChild(btn);
+    });
+    syncSectionFocus();
+  }
+
+  function graphNode(id, label, size, color, extra) {
+    const node = {
+      id: id,
+      name: shortLabel(label, 22),
+      symbolSize: size,
+      itemStyle: { color: color },
+    };
+    if (extra) {
+      Object.keys(extra).forEach(function (key) { node[key] = extra[key]; });
+    }
+    return node;
+  }
+
+  function freqSize(count, max, lo, hi) {
+    const t = Math.sqrt((Number(count) || 1) / (Number(max) || 1));
+    return Math.round(lo + Math.max(0, Math.min(1, t)) * (hi - lo));
+  }
+
+  function clampNum(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  function labelSide(x, y, width, height) {
+    if (x < 120) return "right";
+    if (x > width - 120) return "left";
+    if (y < 32) return "bottom";
+    if (y > height - 32) return "top";
+    return x < width / 2 ? "left" : "right";
+  }
+
+  function graphEdge(source, target, dashed, color) {
+    const line = {
+      curveness: 0.3,
+      width: dashed ? 1.2 : 1.55,
+      type: dashed ? "dashed" : "solid",
+      opacity: 0.92,
+    };
+    if (color) line.color = color;
+    return { source: source, target: target, lineStyle: line };
+  }
+
+  const LINK_HEXAGON = "path://M50,0 L93.3,25 L93.3,75 L50,100 L6.7,75 L6.7,25 Z";
+
+  function categoryLabel(name) {
+    return "(" + shortLabel(name, 20) + ")";
+  }
+
+  function linkFill(hex) {
+    const n = parseInt(String(hex || "").replace("#", ""), 16);
+    return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + ",0.28)";
+  }
+
+  function linkVisual(kind) {
+    if (kind === "ext") return { symbol: LINK_HEXAGON, border: "#93a3b5" };
+    if (kind === "file") return { symbol: "circle", border: "#3dbe9a" };
+    return { symbol: "circle", border: "#00b4e6" };
+  }
+
+  function styleLinkNode(node, kind) {
+    const visual = linkVisual(kind);
+    node.symbol = visual.symbol;
+    node.itemStyle = {
+      color: linkFill(visual.border),
+      borderColor: visual.border,
+      borderWidth: 3.5,
+    };
+    return visual;
+  }
+
+  function collectPageLinks() {
+    const out = [];
+    const seen = Object.create(null);
+    if (!article) return out;
+    article.querySelectorAll("a.link-file, a.link-ext").forEach(function (a) {
+      if (a.classList.contains("link-file")) {
+        const href = a.getAttribute("href") || "";
+        const path = decodeURIComponent(href.replace(/^\//, "").split("#")[0].split("?")[0]);
+        if (!path || seen["file:" + path]) return;
+        seen["file:" + path] = true;
+        const label = String(a.textContent || "").replace(/\s+\S+$/, "").trim() || path.split("/").pop();
+        out.push({
+          kind: "file",
+          path: path,
+          url: href,
+          file: fileKind(path),
+          label: label,
+        });
+        return;
+      }
+      const url = a.href || "";
+      if (!url || seen["ext:" + url]) return;
+      seen["ext:" + url] = true;
+      let host = url;
+      let label = url;
+      try {
+        const parsed = new URL(url);
+        host = parsed.hostname.replace(/^www\./, "");
+        const tail = parsed.pathname.replace(/\/$/, "").split("/").filter(Boolean).pop() || "";
+        label = tail ? host + "/" + tail : host;
+      } catch (err) {
+        host = url;
+        label = url;
+      }
+      out.push({ kind: "ext", url: url, host: host, label: label });
+    });
+    return out;
+  }
+
+  function folderPathsFor(term) {
+    const topics = (lastMemory && lastMemory.topics) || {};
+    const want = String(term || "").trim().toLowerCase();
+    if (!want) return [];
+    const found = [];
+    Object.keys(topics).forEach(function (key) {
+      if (String(key).trim().toLowerCase() !== want) return;
+      (topics[key] || []).forEach(function (path) { found.push(String(path || "")); });
+    });
+    const seen = Object.create(null);
+    const out = [];
+    found.forEach(function (path) {
+      if (!path || path === currentPath || seen[path] || !findNote(path)) return;
+      seen[path] = true;
+      out.push(path);
+    });
+    return out.slice(0, 4);
+  }
+
+  function collectIdeas(doc) {
+    const rich = !!(aiEnabled() && doc && doc.rich);
+    const aiTopics = rich
+      ? (doc.topics || []).map(function (t) { return String(t || "").trim(); }).filter(Boolean)
+      : [];
+    const pairs = ((doc && doc.keywords) || []).filter(function (pair) { return pair && pair[0]; }).slice(0, 16);
+    const buckets = Object.create(null);
+    const order = [];
+    function add(name, pair) {
+      const key = String(name || "").trim().toLowerCase();
+      if (!key) return;
+      if (!buckets[key]) {
+        buckets[key] = { name: String(name).trim(), keywords: [] };
+        order.push(key);
+      }
+      if (!pair) return;
+      const term = String(pair[0]).trim();
+      if (!term) return;
+      const dup = buckets[key].keywords.some(function (kw) { return kw.term.toLowerCase() === term.toLowerCase(); });
+      if (!dup) buckets[key].keywords.push({ term: term, count: Number(pair[1]) || 1 });
+    }
+    if (aiTopics.length) {
+      pairs.forEach(function (pair) {
+        const topic = topicForKeyword(pair[0], aiTopics);
+        if (topic && topic.toLowerCase() !== "other") add(topic, pair);
+        else add(pair[0], pair);
+      });
+    } else {
+      pairs.forEach(function (pair) { add(pair[0], pair); });
+    }
+    return order.map(function (key) {
+      const bucket = buckets[key];
+      const weight = bucket.keywords.reduce(function (sum, kw) { return sum + kw.count; }, 0) || 1;
+      const notes = [];
+      const seen = Object.create(null);
+      bucket.keywords.forEach(function (kw) {
+        folderPathsFor(kw.term).forEach(function (path) {
+          if (seen[path] || notes.length >= 4) return;
+          seen[path] = true;
+          notes.push({ path: path, via: kw.term });
+        });
+      });
+      return {
+        name: bucket.name,
+        color: keywordColor(bucket.name),
+        weight: weight,
+        keywords: bucket.keywords,
+        notes: notes,
+      };
+    }).sort(function (a, b) { return b.weight - a.weight; }).slice(0, 10);
+  }
+
+  function findMetaIdea(name) {
+    const key = String(name || "").toLowerCase();
+    for (let i = 0; i < metaIdeas.length; i++) {
+      if (metaIdeas[i].name.toLowerCase() === key) return metaIdeas[i];
+    }
+    return null;
+  }
+
+  function ideaNameFor(term) {
+    const key = String(term || "").toLowerCase();
+    for (let i = 0; i < metaIdeas.length; i++) {
+      const idea = metaIdeas[i];
+      if (idea.name.toLowerCase() === key) return idea.name;
+      for (let k = 0; k < idea.keywords.length; k++) {
+        if (idea.keywords[k].term.toLowerCase() === key) return idea.name;
+      }
+    }
+    return "";
+  }
+
+  function reconcileFocus(ideas) {
+    if (!metaFocus) return;
+    const name = String(metaFocus.kind === "idea" ? metaFocus.name : metaFocus.term || "").toLowerCase();
+    const found = (ideas || []).some(function (idea) {
+      if (idea.name.toLowerCase() === name) return true;
+      return idea.keywords.some(function (kw) { return kw.term.toLowerCase() === name; });
+    });
+    if (!found) metaFocus = null;
+  }
+
+  function syncKeywordChips() {
+    document.querySelectorAll("#memory-keys [data-keyword]").forEach(function (btn) {
+      const term = btn.getAttribute("data-keyword") || "";
+      btn.setAttribute("aria-pressed", keywordIsOn(term) ? "true" : "false");
+    });
+  }
+
+  function syncCloudFocus() {
+    const cloud = document.getElementById("memory-cloud");
+    if (!cloud) return;
+    cloud.querySelectorAll(".cloud-word").forEach(function (el) {
+      const kind = el.getAttribute("data-kind") || "keyword";
+      const idea = (el.getAttribute("data-idea") || "").toLowerCase();
+      const term = (el.getAttribute("data-term") || "").toLowerCase();
+      let lit = !metaFocus;
+      if (metaFocus && metaFocus.kind === "idea") lit = idea === String(metaFocus.name || "").toLowerCase();
+      else if (metaFocus && metaFocus.kind === "keyword") {
+        lit = term === String(metaFocus.term || "").toLowerCase() || (kind === "idea" && idea === String(metaFocus.idea || "").toLowerCase());
+      }
+      el.classList.toggle("is-dim", !!metaFocus && !lit);
+      el.classList.toggle("is-on", !!metaFocus && lit);
+    });
+  }
+
+  function clearFocusMarks() {
+    clearKeywordHighlights();
+    activeKeywords = [];
+    syncKeywordChips();
+  }
+
+  function reapplyFocusMarks() {
+    if (!metaFocus) return;
+    clearKeywordHighlights();
+    activeKeywords = [];
+    if (metaFocus.kind === "keyword") setKeywordActive(metaFocus.term, true);
+    else if (metaFocus.kind === "idea") {
+      const idea = findMetaIdea(metaFocus.name);
+      (idea ? idea.keywords : []).forEach(function (kw) { setKeywordActive(kw.term, true); });
+    }
+    syncKeywordChips();
+  }
+
+  function focusSeedId() {
+    if (!metaFocus) return "";
+    if (metaFocus.kind === "keyword") {
+      const term = String(metaFocus.term || "").toLowerCase();
+      const idea = findMetaIdea(metaFocus.idea || ideaNameFor(term));
+      if (idea && idea.name.toLowerCase() === term && !keywordOnly(idea)) return "idea:" + term;
+      return "kw:" + term;
+    }
+    const idea = findMetaIdea(metaFocus.name);
+    if (!idea) return "";
+    const only = idea.keywords.length === 1 && idea.keywords[0].term.toLowerCase() === idea.name.toLowerCase();
+    if (only) return "kw:" + idea.keywords[0].term.toLowerCase();
+    return "idea:" + idea.name.toLowerCase();
+  }
+
+  function paintGraphFocus() {
+    syncCloudFocus();
+    syncSectionFocus();
+    if (!metaChart || !metaGraphModel) return;
+    metaChart.dispatchAction({ type: "downplay", seriesIndex: 0 });
+    const seed = focusSeedId();
+    if (!seed) return;
+    const index = metaGraphModel.nodes.findIndex(function (node) { return node.id === seed; });
+    if (index < 0) return;
+    metaChart.dispatchAction({ type: "highlight", seriesIndex: 0, dataIndex: index });
+  }
+
+  function selectIdea(name) {
+    const clean = String(name || "").trim();
+    if (!clean) return;
+    if (metaFocus && metaFocus.kind === "idea" && metaFocus.name.toLowerCase() === clean.toLowerCase()) {
+      metaFocus = null;
+      clearFocusMarks();
+      paintGraphFocus();
+      return;
+    }
+    metaFocus = { kind: "idea", name: clean };
+    reapplyFocusMarks();
+    paintGraphFocus();
+  }
+
+  function selectKeyword(term) {
+    const clean = String(term || "").trim();
+    if (!clean) return;
+    if (metaFocus && metaFocus.kind === "keyword" && metaFocus.term.toLowerCase() === clean.toLowerCase()) {
+      metaFocus = null;
+      clearFocusMarks();
+      paintGraphFocus();
+      return;
+    }
+    metaFocus = { kind: "keyword", term: clean, idea: ideaNameFor(clean) };
+    reapplyFocusMarks();
+    paintGraphFocus();
+  }
+
+  function zoomGraph(factor) {
+    if (!metaChart) return;
+    const host = document.getElementById("memory-graph");
+    metaChart.dispatchAction({
+      type: "graphRoam",
+      seriesIndex: 0,
+      zoom: factor,
+      originX: host ? host.clientWidth / 2 : 200,
+      originY: host ? host.clientHeight / 2 : 140,
+    });
+  }
+
+  function homeGraph() {
+    metaFocus = null;
+    clearFocusMarks();
+    syncCloudFocus();
+    syncSectionFocus();
+    paintGraph((lastMemory && lastMemory.doc) || {});
+  }
+
+  function setMetaWide(on) {
+    metaWide = !!on;
+    const panel = document.getElementById("memory-meta");
+    if (panel) panel.classList.toggle("is-wide", metaWide);
+    const btn = document.getElementById("memory-graph-expand");
+    if (btn) {
+      btn.setAttribute("aria-pressed", metaWide ? "true" : "false");
+      btn.textContent = metaWide ? "Shrink" : "Enlarge";
+    }
+    requestAnimationFrame(function () {
+      requestAnimationFrame(refreshMeta);
+    });
+  }
+
+  function atRing(ang, ring, width, height) {
+    return {
+      x: clampNum(width / 2 + Math.cos(ang) * ((width / 2) * ring), 36, width - 36),
+      y: clampNum(height / 2 + Math.sin(ang) * ((height / 2) * ring), 28, height - 28),
+    };
+  }
+
+  function keywordOnly(idea) {
+    return idea.keywords.length === 1 && idea.keywords[0].term.toLowerCase() === idea.name.toLowerCase();
+  }
+
+  function separateNodes(nodes, width, height) {
+    for (let pass = 0; pass < 6; pass++) {
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i];
+          const b = nodes[j];
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+          const hubGap = (a.id === "me" || b.id === "me") ? 28 : 0;
+          const need = (a.symbolSize + b.symbolSize) / 2 + 8 + hubGap;
+          if (dist >= need) continue;
+          const push = (need - dist) / 2;
+          dx /= dist;
+          dy /= dist;
+          if (a.id !== "me") {
+            a.x -= dx * push;
+            a.y -= dy * push;
+          }
+          if (b.id !== "me") {
+            b.x += dx * push;
+            b.y += dy * push;
+          }
+        }
+      }
+    }
+    nodes.forEach(function (node) {
+      if (node.id === "me") return;
+      const padX = node.symbolSize / 2 + 16;
+      const padY = node.symbolSize / 2 + 12;
+      node.x = clampNum(node.x, padX, width - padX);
+      node.y = clampNum(node.y, padY, height - padY);
+    });
+  }
+
+  function buildGraphModel(doc, width, height) {
+    const ideas = metaIdeas.length ? metaIdeas : collectIdeas(doc || {});
+    const nodes = [];
+    const links = [];
+    const used = Object.create(null);
+    const cx = width / 2;
+    const cy = height / 2;
+    const title = (doc && (doc.title || currentPath)) || "This note";
+    const me = graphNode("me", shortLabel(title, 18), 16, "#14202c", { kind: "me" });
+    me.x = cx;
+    me.y = ideas.length === 1 ? height - 34 : cy;
+    me.label = { show: false };
+    nodes.push(me);
+
+    const maxW = ideas.reduce(function (m, idea) { return Math.max(m, idea.weight); }, 1);
+    const count = Math.max(ideas.length, 1);
+    ideas.forEach(function (idea, i) {
+      const ang = -Math.PI / 2 + (i / count) * Math.PI * 2;
+      const only = keywordOnly(idea);
+      const ideaColor = keywordColor(idea.name);
+      const hubRing = ideas.length === 1 ? 0 : 0.28;
+      const hubPos = ideas.length === 1 ? { x: cx, y: cy } : atRing(ang, hubRing, width, height);
+      let hubId = "";
+      if (only) {
+        const kw = idea.keywords[0];
+        const kwColor = keywordColor(kw.term);
+        hubId = "kw:" + kw.term.toLowerCase();
+        nodes.push(graphNode(hubId, kw.term, freqSize(kw.count, maxW, 22, 58), kwColor, {
+          kind: "keyword",
+          term: kw.term,
+          idea: idea.name,
+          x: hubPos.x,
+          y: hubPos.y,
+        }));
+      } else {
+        hubId = "idea:" + idea.name.toLowerCase();
+        const ideaNode = graphNode(hubId, categoryLabel(idea.name), freqSize(idea.weight, maxW, 28, 60), ideaColor, {
+          kind: "idea",
+          idea: idea.name,
+          x: hubPos.x,
+          y: hubPos.y,
+          itemStyle: { color: ideaColor, borderColor: "#14202c", borderWidth: 1.5 },
+        });
+        ideaNode.name = categoryLabel(idea.name);
+        nodes.push(ideaNode);
+        const orbit = idea.keywords.filter(function (kw) {
+          return kw.term.toLowerCase() !== idea.name.toLowerCase();
+        });
+        orbit.forEach(function (kw, k) {
+          const span = Math.min(1.15, 0.42 * Math.max(orbit.length, 1));
+          const kAng = ang - span / 2 + (k + 0.5) * (span / orbit.length);
+          const pos = atRing(kAng, 0.52, width, height);
+          const id = "kw:" + kw.term.toLowerCase();
+          const kwColor = keywordColor(kw.term);
+          nodes.push(graphNode(id, kw.term, freqSize(kw.count, maxW, 16, 46), kwColor, {
+            kind: "keyword",
+            term: kw.term,
+            idea: idea.name,
+            x: pos.x,
+            y: pos.y,
+          }));
+          links.push(graphEdge(id, hubId, false, kwColor));
+        });
+      }
+      links.push(graphEdge(hubId, "me", true, ideaColor));
+      idea.notes.forEach(function (note, j) {
+        if (used[note.path]) return;
+        used[note.path] = true;
+        const span = Math.min(1.05, 0.38 * Math.max(idea.notes.length, 1));
+        const t = idea.notes.length === 1 ? 0 : (j / (idea.notes.length - 1)) - 0.5;
+        const pos = atRing(ang + t * span, 0.84, width, height);
+        const id = "note:" + note.path;
+        const found = findNote(note.path);
+        const viaSame = String(note.via || "").toLowerCase() === idea.name.toLowerCase();
+        const kwId = "kw:" + String(note.via || "").toLowerCase();
+        const node = graphNode(id, (found && found.title) || note.path, 22, "transparent", {
+          kind: "note",
+          path: note.path,
+          idea: idea.name,
+          x: pos.x,
+          y: pos.y,
+        });
+        styleLinkNode(node, "note");
+        nodes.push(node);
+        links.push(graphEdge(id, hubId, false, ideaColor));
+        if (!only && !viaSame) links.push(graphEdge(id, kwId, false, keywordColor(note.via)));
+      });
+    });
+
+    const extras = [];
+    (doc.links || []).forEach(function (path) {
+      if (!path || path === currentPath || used[path] || !findNote(path)) return;
+      extras.push({ kind: "note", path: path, dashed: false });
+    });
+    const hasNotes = nodes.some(function (node) { return node.kind === "note"; });
+    if (!hasNotes) {
+      const linked = Object.create(null);
+      (doc.links || []).forEach(function (path) { linked[path] = true; });
+      (doc.related || []).forEach(function (path) {
+        if (!path || path === currentPath || linked[path] || used[path] || !findNote(path)) return;
+        extras.push({ kind: "note", path: path, dashed: true });
+      });
+    }
+    const pageLinks = collectPageLinks();
+    const extFirst = [];
+    const fileNext = [];
+    pageLinks.forEach(function (item) {
+      const key = item.kind === "ext" ? item.url : item.path;
+      if (!key || used[key]) return;
+      if (item.kind === "ext") extFirst.push(item);
+      else fileNext.push(item);
+    });
+    extFirst.concat(fileNext).concat(extras).slice(0, 8).forEach(function (item, i, list) {
+      const key = item.url || item.path;
+      if (!key || used[key]) return;
+      used[key] = true;
+      const ang = -Math.PI / 2 + ((i + 0.5) / Math.max(list.length, 1)) * Math.PI * 2;
+      const pos = atRing(ang, 0.86, width, height);
+      let id = "";
+      let label = "";
+      const extra = { kind: item.kind, x: pos.x, y: pos.y };
+      if (item.kind === "ext") {
+        id = "ext:" + item.url;
+        label = item.label || item.host || item.url;
+        extra.url = item.url;
+      } else if (item.kind === "file") {
+        id = "file:" + item.path;
+        label = item.label || item.path;
+        extra.path = item.path;
+        extra.url = item.url;
+        extra.file = item.file;
+      } else {
+        id = "note:" + item.path;
+        const found = findNote(item.path);
+        label = (found && found.title) || item.path;
+        extra.path = item.path;
+      }
+      const node = graphNode(id, label, 22, "transparent", extra);
+      const visual = styleLinkNode(node, item.kind);
+      nodes.push(node);
+      links.push(graphEdge(id, "me", !!item.dashed, visual.border));
+    });
+
+    separateNodes(nodes, width, height);
+    nodes.forEach(function (node) {
+      if (node.id === "me") node.label = { show: false };
+      else node.label = { position: labelSide(node.x, node.y, width, height) };
+    });
+    return { nodes: nodes, links: links };
+  }
+
+  function paintGraph(doc) {
+    const host = document.getElementById("memory-graph");
+    if (!host) return;
+    const gen = ++metaGraphGen;
+    if (metaChart) {
+      metaChart.dispose();
+      metaChart = null;
+    }
+    metaGraphModel = null;
+    const width = host.clientWidth || 480;
+    const height = host.clientHeight || 288;
+    const model = buildGraphModel(doc || {}, width, height);
+    if (model.nodes.length < 2) {
+      host.innerHTML = '<p class="memory-empty">No links or keywords in this note.</p>';
+      return;
+    }
+    metaGraphModel = model;
+    host.innerHTML = "";
+    ensureEcharts().then(function (echarts) {
+      if (gen !== metaGraphGen || !metaOpen || !host.isConnected) return;
+      metaChart = echarts.init(host, null, { renderer: "canvas" });
+      metaChart.setOption({
+        animationDuration: 280,
+        animationDurationUpdate: 280,
+        tooltip: { show: false },
+        series: [{
+          type: "graph",
+          layout: "none",
+          roam: true,
+          draggable: true,
+          cursor: "pointer",
+          label: {
+            show: true,
+            color: "#14202c",
+            fontFamily: "Inter, sans-serif",
+            fontSize: 11,
+            fontWeight: 600,
+          },
+          labelLayout: { hideOverlap: true },
+          lineStyle: { color: "source", curveness: 0.3, width: 1.5, opacity: 0.9 },
+          emphasis: { focus: "adjacency", lineStyle: { width: 2.6 } },
+          blur: {
+            itemStyle: { opacity: 0.12 },
+            lineStyle: { opacity: 0.05 },
+            label: { opacity: 0.28 },
+          },
+          data: model.nodes,
+          links: model.links,
+        }],
+      });
+      metaChart.on("click", function (params) {
+        const data = params && params.data;
+        if (!data || params.dataType !== "node") return;
+        if (data.kind === "idea") {
+          selectIdea(data.idea || "");
+          return;
+        }
+        if (data.kind === "keyword" && data.term) {
+          selectKeyword(data.term);
+          return;
+        }
+        if (data.kind === "me") {
+          metaFocus = null;
+          clearFocusMarks();
+          paintGraphFocus();
+          return;
+        }
+        if (data.kind === "note" && data.path) {
+          loadDoc(data.path, "", false);
+          return;
+        }
+        if (data.kind === "file" && data.url) {
+          if (data.file === "image" || data.file === "video" || data.file === "pdf") {
+            openLightbox({ type: data.file, src: data.url, alt: data.name || "" });
+          }
+          return;
+        }
+        if (data.kind === "ext" && data.url) window.open(data.url, "_blank", "noopener");
+      });
+      requestAnimationFrame(function () {
+        if (!metaChart || gen !== metaGraphGen) return;
+        metaChart.resize();
+        paintGraphFocus();
+      });
+    }).catch(function () {
+      if (gen !== metaGraphGen) return;
+      host.innerHTML = '<p class="memory-empty">The link graph needs a network the first time.</p>';
+    });
+  }
+
+  function metaModeFor(doc) {
+    return (aiEnabled() && doc && doc.rich) ? "ai" : "off";
+  }
+
+  function renderMeta(doc) {
+    const panel = document.getElementById("memory-meta");
+    if (panel) panel.setAttribute("data-meta-mode", metaModeFor(doc));
+    const stats = document.getElementById("memory-meta-stats");
+    const words = noteWordCount();
+    const minutes = words ? Math.max(1, Math.round(words / 220)) : 0;
+    const headings = article ? article.querySelectorAll("h1, h2, h3").length : (doc.headings || []).length;
+    const notes = (doc.links || []).length;
+    const sites = externalHosts().length;
+    if (stats) {
+      const bits = [
+        words + " words",
+        minutes ? minutes + " min" : "0 min",
+        headings + (headings === 1 ? " heading" : " headings"),
+        notes + (notes === 1 ? " note" : " notes"),
+        sites + (sites === 1 ? " site" : " sites"),
+      ];
+      if (aiEnabled() && doc.rich) bits.push("AI themes");
+      stats.textContent = bits.join(" · ");
+    }
+    metaIdeas = collectIdeas(doc || {});
+    reconcileFocus(metaIdeas);
+    if (metaFocus) reapplyFocusMarks();
+    renderCloud(doc || {});
+    renderSections(doc || {});
+    paintGraph(doc || {});
   }
 
   function beginMemory() {
@@ -1357,6 +2635,7 @@
           }).join("")
         : "";
     }
+    refreshMeta();
   }
 
   async function syncMemory(path) {
@@ -1371,7 +2650,7 @@
       renderMemory(data);
       if (aiEnabled() && data.doc && !data.doc.rich) {
         const rich = await postJSON("/api/memory/enrich", { path: path });
-        if (gen !== memoryGen || path !== currentPath) return;
+        if (gen !== memoryGen || path !== currentPath || !aiEnabled()) return;
         if (rich && rich.doc) renderMemory(rich);
       }
     } catch (err) {
@@ -1613,29 +2892,40 @@
       }
       log.appendChild(row);
     });
-    const hasTurns = messages.some(function (msg) {
-      return msg.role === "user" || msg.role === "assistant";
-    });
+    const hasTurns = chatHasTurns(messages);
     if (copyBtn) copyBtn.hidden = !(on && hasTurns);
     if (askBox) {
-      if (!on) askBox.hidden = true;
-      else if (hasTurns && !askClosed) askBox.hidden = false;
+      if (!on || askClosed) askBox.hidden = true;
+      else if (hasTurns) askBox.hidden = false;
     }
     syncAskToggle();
     log.scrollTop = log.scrollHeight;
   }
 
+  function chatHasTurns(messages) {
+    return (messages || []).some(function (msg) {
+      return msg.role === "user" || msg.role === "assistant";
+    });
+  }
+
   async function loadChat(path) {
     if (!path) return;
-    askClosed = false;
+    askClosed = true;
+    const pendingBox = document.getElementById("memory-ask");
+    if (pendingBox) pendingBox.hidden = true;
+    syncAskToggle();
     const gen = ++chatGen;
     try {
       const res = await fetch("/api/chat?path=" + encodeURIComponent(path), { cache: "no-store" });
       const data = await res.json().catch(function () { return {}; });
       if (gen !== chatGen || path !== currentPath) return;
+      askClosed = !chatHasTurns(data && data.messages);
       renderChat(data);
     } catch (err) {
-      if (gen === chatGen) renderChat({ messages: [] });
+      if (gen === chatGen) {
+        askClosed = true;
+        renderChat({ messages: [] });
+      }
     }
   }
 
@@ -1867,9 +3157,7 @@
         const btn = ev.target.closest("[data-keyword]");
         if (!btn || !keysEl.contains(btn)) return;
         const term = btn.getAttribute("data-keyword") || "";
-        const on = btn.getAttribute("aria-pressed") !== "true";
-        btn.setAttribute("aria-pressed", on ? "true" : "false");
-        setKeywordActive(term, on);
+        selectKeyword(term);
       });
     }
     const relatedEl = document.getElementById("memory-related");
@@ -1889,6 +3177,20 @@
         sendChat(btn.getAttribute("data-preset"), "");
       });
     }
+    const metaBtn = document.getElementById("memory-meta-toggle");
+    if (metaBtn) {
+      metaBtn.addEventListener("click", function () {
+        setMetaOpen(!metaOpen);
+      });
+    }
+    const graphHome = document.getElementById("memory-graph-home");
+    const graphIn = document.getElementById("memory-graph-in");
+    const graphOut = document.getElementById("memory-graph-out");
+    const graphExpand = document.getElementById("memory-graph-expand");
+    if (graphHome) graphHome.addEventListener("click", homeGraph);
+    if (graphIn) graphIn.addEventListener("click", function () { zoomGraph(1.25); });
+    if (graphOut) graphOut.addEventListener("click", function () { zoomGraph(0.8); });
+    if (graphExpand) graphExpand.addEventListener("click", function () { setMetaWide(!metaWide); });
     const askBtn = document.getElementById("memory-ask-toggle");
     const askBox = document.getElementById("memory-ask");
     if (askBtn && askBox) {
@@ -2082,7 +3384,7 @@
         items.push({
           el: a,
           label: a.dataset.label || "",
-          hay: (a.dataset.label || "") + " " + (a.dataset.path || "") + " " + (a.dataset.group || ""),
+          hay: (a.dataset.titleLabel || "") + " " + (a.dataset.fileLabel || "") + " " + (a.dataset.path || "") + " " + (a.dataset.group || ""),
         });
       });
       const hits = fuzzysort.go(query, items, { key: "hay", threshold: 0.4 });
@@ -2102,7 +3404,7 @@
     } else {
       const q = query.toLowerCase();
       links.forEach(function (a) {
-        const hay = ((a.dataset.label || "") + " " + (a.dataset.path || "")).toLowerCase();
+        const hay = ((a.dataset.titleLabel || "") + " " + (a.dataset.fileLabel || "") + " " + (a.dataset.path || "")).toLowerCase();
         a.hidden = hay.indexOf(q) === -1;
         a.textContent = a.dataset.label || "";
       });
@@ -2175,7 +3477,9 @@
         a.href = "?doc=" + encodeURIComponent(n.path);
         a.dataset.path = n.path;
         a.dataset.group = g;
-        a.dataset.label = shortTitle(n);
+        a.dataset.titleLabel = shortTitle(n);
+        a.dataset.fileLabel = fileNameOf(n);
+        paintNoteLink(a);
         a.textContent = a.dataset.label;
         a.addEventListener("click", function (ev) {
           if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;
@@ -2193,6 +3497,50 @@
     });
     applyFilter();
   }
+
+  let navLabelMode = "title";
+  try {
+    if (localStorage.getItem(LABEL_KEY) === "file") navLabelMode = "file";
+  } catch (e) { /* ignore */ }
+
+  function fileNameOf(n) {
+    const path = String((n && n.path) || "");
+    const slash = path.lastIndexOf("/");
+    return slash === -1 ? path : path.slice(slash + 1);
+  }
+
+  function syncLabelSwitch() {
+    const titleBtn = document.getElementById("nav-label-title");
+    const fileBtn = document.getElementById("nav-label-file");
+    if (titleBtn) titleBtn.setAttribute("aria-pressed", navLabelMode === "title" ? "true" : "false");
+    if (fileBtn) fileBtn.setAttribute("aria-pressed", navLabelMode === "file" ? "true" : "false");
+  }
+
+  function paintNoteLink(a) {
+    const titleLabel = a.dataset.titleLabel || "";
+    const fileLabel = a.dataset.fileLabel || "";
+    const shown = navLabelMode === "file" ? fileLabel : titleLabel;
+    const other = navLabelMode === "file" ? titleLabel : fileLabel;
+    a.dataset.label = shown;
+    if (other && other !== shown) a.title = other;
+    else a.removeAttribute("title");
+  }
+
+  function setNavLabelMode(mode) {
+    navLabelMode = mode === "file" ? "file" : "title";
+    try {
+      localStorage.setItem(LABEL_KEY, navLabelMode);
+    } catch (e) { /* ignore */ }
+    syncLabelSwitch();
+    navList.querySelectorAll(".nav-group-body a").forEach(paintNoteLink);
+    applyFilter();
+  }
+
+  syncLabelSwitch();
+  const navLabelTitle = document.getElementById("nav-label-title");
+  const navLabelFile = document.getElementById("nav-label-file");
+  if (navLabelTitle) navLabelTitle.addEventListener("click", function () { setNavLabelMode("title"); });
+  if (navLabelFile) navLabelFile.addEventListener("click", function () { setNavLabelMode("file"); });
 
   function shortTitle(n) {
     const t = n.title
@@ -2468,6 +3816,10 @@
     applySavedRailWidth();
     if (peekEl && !peekEl.hidden && peekAnchor) placePeek(peekAnchor);
     if (selMenu && !selMenu.hidden) placeSelMenu();
+    if (metaOpen) {
+      window.clearTimeout(metaResizeTimer);
+      metaResizeTimer = window.setTimeout(refreshMeta, 140);
+    }
   });
   window.addEventListener("scroll", function () {
     if (selMenu && !selMenu.hidden) hideSelMenu();
@@ -2620,6 +3972,9 @@
     applyAiEnabled(on);
     btn.addEventListener("click", function () {
       applyAiEnabled(!aiEnabled());
+      // Repaint the open cloud and graph in the new mode before the visit returns.
+      // AI off drops stored themes. AI on uses them when the note is already rich,
+      // and syncMemory fills them in when it is not.
       if (currentPath) renderMemoryFromLast();
       if (currentPath) renderChat(lastChat || { messages: [] });
       if (currentPath) syncMemory(currentPath);

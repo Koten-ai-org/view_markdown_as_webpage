@@ -743,6 +743,26 @@ class ConfigAiHttpTests(unittest.TestCase):
         self.assertEqual(len(rich["doc"]["tldr"]), 3)
         again, _ = self._json("/api/memory/enrich", {"path": "hello.md"})
         self.assertFalse(again.get("enriched"))
+        self.assertEqual(rich["doc"]["topics"], ["hello"])
+        kept, _ = self._json("/api/memory/visit", {"path": "hello.md"})
+        self.assertEqual(kept["doc"]["sha256"], rich["doc"]["sha256"])
+        self.assertTrue(kept["doc"]["rich"])
+        self.assertEqual(kept["doc"]["topics"], ["hello"])
+        self.assertEqual(kept["doc"]["tldr"], rich["doc"]["tldr"])
+        note = self.notes / "hello.md"
+        original = note.read_text(encoding="utf-8")
+        try:
+            note.write_text(
+                "# Hello\n\nPatient care patient care is the whole note now.\n",
+                encoding="utf-8",
+            )
+            changed, _ = self._json("/api/memory/visit", {"path": "hello.md"})
+            self.assertTrue(changed["fresh"])
+            self.assertFalse(changed["doc"]["rich"])
+            self.assertEqual(changed["doc"]["tldr"], [])
+            self.assertNotEqual(changed["doc"]["topics"], ["hello"])
+        finally:
+            note.write_text(original, encoding="utf-8")
 
     def _save_dummy(self):
         self._json(

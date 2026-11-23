@@ -146,10 +146,14 @@
     });
   }
 
+  let browseSeq = 0;
+
   async function browse(path) {
+    const seq = ++browseSeq;
     showErr("");
     try {
       const data = await getJson("/api/fs?path=" + encodeURIComponent(path || ""));
+      if (seq !== browseSeq) return;
       currentPath = data.path;
       pathInput.value = data.path;
       renderCrumbs(data.path, data.parent);
@@ -163,6 +167,7 @@
           : "No markdown in this folder (subfolders may still have notes)";
       viewBtn.disabled = false;
     } catch (err) {
+      if (seq !== browseSeq) return;
       showErr(err.message || String(err));
     }
   }
@@ -207,9 +212,11 @@
       showVersion(state.version);
       renderRecent(state.recent || []);
       renderShortcuts(state.shortcuts || []);
+      if (browseSeq) return;
       const start = state.last || (state.shortcuts[0] && state.shortcuts[0].path) || state.start_dir || "";
       await browse(start);
     } catch (err) {
+      if (browseSeq) return;
       showErr("This page needs the local server. Run python3 serve.py then open http://127.0.0.1:8765");
     }
   }

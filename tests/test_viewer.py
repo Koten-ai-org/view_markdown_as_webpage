@@ -104,10 +104,48 @@ class ViewerFoldTests(unittest.TestCase):
         self.page = self.context.new_page()
         self.addCleanup(self.page.close)
 
+    def _meta_phrase_colors(self, page):
+        page.wait_for_function(
+            """() => {
+              const host = document.getElementById("memory-graph");
+              const chart = window.echarts && host && window.echarts.getInstanceByDom(host);
+              const nodes = chart ? (((chart.getOption().series || [])[0] || {}).data || []) : [];
+              return nodes.some(function (node) { return node.id === "kw:fixture notes"; });
+            }"""
+        )
+        return page.evaluate(
+            """() => {
+              function cloud(term) {
+                const el = document.querySelector('#memory-cloud .cloud-word[data-term="' + term + '"]');
+                return el ? el.getAttribute("data-color") : "";
+              }
+              const host = document.getElementById("memory-graph");
+              const chart = window.echarts.getInstanceByDom(host);
+              const nodes = ((chart.getOption().series || [])[0] || {}).data || [];
+              function nodeColor(id) {
+                const found = nodes.find(function (node) { return node.id === id; });
+                return found && found.itemStyle ? found.itemStyle.color : "";
+              }
+              return {
+                cloudFixture: cloud("fixture notes"),
+                cloudRoot: cloud("root note"),
+                graphFixture: nodeColor("kw:fixture notes"),
+                graphRoot: nodeColor("kw:root note"),
+                ideas: nodes.filter(function (node) {
+                  return String(node.id || "").indexOf("idea:") === 0;
+                }).map(function (node) {
+                  return { name: node.name, color: node.itemStyle && node.itemStyle.color };
+                }),
+              };
+            }"""
+        )
+
     def _open_reader(self):
         page = self.page
-        page.add_init_script("try { localStorage.removeItem('mdview-ai'); } catch (e) {}")
         page.goto(self.base + "/viewer.html", wait_until="domcontentloaded")
+        # Clear once. An init script would also run on reload and wipe a toggle the test just saved.
+        page.evaluate("() => { try { localStorage.removeItem('mdview-ai'); } catch (e) {} }")
+        page.reload(wait_until="domcontentloaded")
         expect(page.locator(".nav-folder").first).to_be_visible()
         return page
 
@@ -143,6 +181,34 @@ class ViewerFoldTests(unittest.TestCase):
         atlas.locator(".nav-fold").click()
         expect(note).to_be_visible()
         expect(atlas.locator(".nav-fold")).to_have_attribute("aria-expanded", "true")
+
+    def test_nav_label_toggle_persists(self):
+        page = self._open_reader()
+        page.evaluate("() => localStorage.removeItem('mdview-nav-label')")
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator(".nav-folder").first).to_be_visible()
+        readme = page.locator('a[data-path="README.md"]')
+        two = page.locator('a[data-path="blogs/two.md"]')
+        expect(readme).to_have_text("Overview")
+        expect(readme).to_have_attribute("title", "README.md")
+        expect(two).to_have_text("two")
+        expect(page.locator("#nav-label-title")).to_have_attribute("aria-pressed", "true")
+        page.locator("#nav-label-file").click()
+        expect(readme).to_have_text("README.md")
+        expect(readme).to_have_attribute("title", "Overview")
+        expect(two).to_have_text("two.md")
+        expect(page.locator("#nav-label-file")).to_have_attribute("aria-pressed", "true")
+        expect(page.locator("#nav-label-title")).to_have_attribute("aria-pressed", "false")
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator(".nav-folder").first).to_be_visible()
+        expect(page.locator('a[data-path="README.md"]')).to_have_text("README.md")
+        expect(page.locator("#nav-label-file")).to_have_attribute("aria-pressed", "true")
+        page.locator("#nav-label-title").click()
+        expect(page.locator('a[data-path="README.md"]')).to_have_text("Overview")
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator(".nav-folder").first).to_be_visible()
+        expect(page.locator('a[data-path="README.md"]')).to_have_text("Overview")
+        expect(page.locator("#nav-label-title")).to_have_attribute("aria-pressed", "true")
 
     def test_hide_all_and_show_all(self):
         page = self._open_reader()
@@ -507,6 +573,233 @@ class ViewerFoldTests(unittest.TestCase):
         expect(page.locator("#sel-menu")).to_be_hidden()
         page.locator("#ai-toggle").click()
         expect(page.locator("#ai-toggle")).to_have_attribute("aria-pressed", "false")
+
+    def test_meta_panel_cloud_graph_and_sections(self):
+        page = self._open_reader()
+
+        def handle_visit(route):
+            try:
+                asked = json.loads(route.request.post_data or "{}")
+            except json.JSONDecodeError:
+                asked = {}
+            path = str(asked.get("path") or "")
+            if path.endswith("two.md"):
+                doc = {
+                    "path": "blogs/two.md",
+                    "title": "Blogs two",
+                    "sha256": "meta-two",
+                    "headings": ["Blogs two"],
+                    "links": [],
+                    "keywords": [["fixture notes", 4], ["other phrase", 2]],
+                    "related": [],
+                    "topics": ["notes basket"],
+                    "tldr": ["Two keeps fixture notes"],
+                    "important": "Shared phrase",
+                    "next_action": "Compare colors",
+                    "rich": True,
+                }
+            else:
+                doc = {
+                    "path": "README.md",
+                    "title": "Fixture notes",
+                    "sha256": "meta-pack",
+                    "headings": ["Fixture notes"],
+                    "links": ["blogs/two.md"],
+                    "keywords": [["fixture notes", 6], ["root note", 3]],
+                    "related": ["atlas/one.md"],
+                    "topics": ["fixture layer"],
+                    "tldr": ["Fixture notes keep the reader honest"],
+                    "important": "Root note stays in the fixture",
+                    "next_action": "Open the other note",
+                    "rich": True,
+                }
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"ok": True, "doc": doc}),
+            )
+
+        page.route("**/api/memory/visit", handle_visit)
+        page.route("**/api/memory/enrich", lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"ok": True, "enriched": False}),
+        ))
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator(".nav-folder").first).to_be_visible()
+        toggle = page.locator("#memory-meta-toggle")
+        expect(toggle).to_be_visible()
+        expect(toggle).to_have_text("Meta")
+        expect(toggle).to_have_css("background-color", "rgb(240, 180, 41)")
+        expect(page.locator("#memory-meta")).to_be_hidden()
+        toggle.click()
+        expect(toggle).to_have_css("background-color", "rgb(196, 137, 13)")
+        expect(page.locator("#memory-meta")).to_be_visible()
+        expect(page.locator("#memory-meta")).to_have_attribute("data-meta-mode", "off")
+        expect(page.locator("#memory-meta-stats")).not_to_contain_text("AI themes")
+        expect(page.locator("#memory-meta-stats")).to_contain_text("words")
+        expect(page.locator("#memory-meta-stats")).to_contain_text("heading")
+        expect(page.locator(".cloud-word", has_text="fixture notes")).to_be_visible()
+        page.locator(".cloud-word", has_text="fixture notes").click()
+        expect(page.locator("#doc mark.kw-hit").first).to_be_visible()
+        expect(page.locator(".cloud-word.is-on", has_text="fixture notes")).to_be_visible()
+        expect(page.locator(".cloud-word.is-dim", has_text="root note")).to_be_visible()
+        expect(page.locator(".section-block.is-on")).to_be_visible()
+        expect(page.locator("#memory-sections")).to_contain_text("Fixture notes")
+        expect(page.locator(".section-count").first).to_have_text("6")
+        page.locator(".section-block").first.hover()
+        expect(page.locator("#section-tip")).to_be_visible()
+        expect(page.locator("#section-tip")).to_contain_text("6 words")
+        expect(page.locator("#section-tip")).to_contain_text("fixture notes")
+        expect(page.locator("#memory-cloud")).to_have_attribute("data-packed", "1")
+        expect(page.locator(".cloud-topic")).to_have_count(0)
+        expect(page.locator("#memory-graph canvas")).to_be_visible()
+        spread = page.locator("#memory-graph").evaluate(
+            """el => {
+              const chart = window.echarts && window.echarts.getInstanceByDom(el);
+              if (!chart) return null;
+              const series = (chart.getOption().series || [])[0] || {};
+              const nodes = series.data || [];
+              const xs = nodes.map(n => Number(n.x) || 0);
+              const ys = nodes.map(n => Number(n.y) || 0);
+              const kws = nodes.filter(n => String(n.id || "").indexOf("kw:") === 0);
+              const notes = nodes.filter(n => String(n.id || "").indexOf("note:") === 0);
+              const links = series.links || [];
+              return {
+                n: nodes.length,
+                dx: Math.max.apply(null, xs) - Math.min.apply(null, xs),
+                dy: Math.max.apply(null, ys) - Math.min.apply(null, ys),
+                sizes: kws.map(n => n.symbolSize),
+                curved: links.length > 0 && links.every(l => l.lineStyle && l.lineStyle.curveness === 0.3),
+                noteFill: notes.map(n => (n.itemStyle && n.itemStyle.color) || ""),
+                noteBorder: notes.map(n => (n.itemStyle && n.itemStyle.borderColor) || ""),
+                noteSymbol: notes.map(n => n.symbol || "circle"),
+                noteWidth: notes.map(n => n.itemStyle && n.itemStyle.borderWidth),
+                kwFilled: kws.every(n => {
+                  const color = n.itemStyle && n.itemStyle.color;
+                  const name = String(n.name || "");
+                  return !!color && color !== "transparent" && String(n.symbol || "circle").indexOf("path://") !== 0 && name.charAt(0) !== "(";
+                }),
+              };
+            }"""
+        )
+        self.assertIsNotNone(spread)
+        self.assertGreaterEqual(spread["n"], 4)
+        self.assertGreater(spread["dx"], 100)
+        self.assertGreater(spread["dy"], 50)
+        self.assertEqual(len(spread["sizes"]), 2)
+        self.assertNotEqual(spread["sizes"][0], spread["sizes"][1])
+        self.assertTrue(spread["curved"])
+        self.assertTrue(spread["kwFilled"])
+        self.assertGreaterEqual(len(spread["noteFill"]), 1)
+        self.assertTrue(all(str(color).startswith("rgba(0,180,230,") or str(color).startswith("rgba(0, 180, 230,") for color in spread["noteFill"]))
+        self.assertTrue(all(color == "#00b4e6" for color in spread["noteBorder"]))
+        self.assertTrue(all(symbol == "circle" for symbol in spread["noteSymbol"]))
+        self.assertTrue(all((width or 0) >= 3 for width in spread["noteWidth"]))
+        offline = self._meta_phrase_colors(page)
+        self.assertEqual(offline["cloudFixture"], "#9fd36a")
+        self.assertEqual(offline["graphFixture"], "#9fd36a")
+        self.assertEqual(offline["cloudRoot"], "#9fd36a")
+        self.assertEqual(offline["graphRoot"], "#9fd36a")
+        self.assertEqual(offline["ideas"], [])
+        cloud_labels = page.locator(".cloud-word").evaluate_all("els => els.map(el => el.textContent || '')")
+        self.assertTrue(cloud_labels)
+        self.assertTrue(all("(" not in text for text in cloud_labels))
+        page.locator("#memory-graph-expand").click()
+        expect(page.locator("#memory-meta")).to_have_class("memory-meta is-wide")
+        expect(page.locator("#memory-graph canvas")).to_be_visible()
+        page.locator("#memory-graph-home").click()
+        expect(page.locator(".cloud-word.is-dim")).to_have_count(0)
+        page.locator("#memory-graph-expand").click()
+        expect(page.locator("#memory-graph-expand")).to_have_attribute("aria-pressed", "false")
+        page.locator("#ai-toggle").click()
+        expect(page.locator("#memory-actions .memory-action").first).to_be_visible()
+        place = page.evaluate(
+            """() => {
+              const label = document.getElementById("memory-actions-label").getBoundingClientRect();
+              const meta = document.getElementById("memory-meta-toggle").getBoundingClientRect();
+              const action = document.querySelector("#memory-actions .memory-action").getBoundingClientRect();
+              return { label: label.left, meta: meta.left, action: action.left };
+            }"""
+        )
+        self.assertLess(place["label"], place["meta"])
+        self.assertLess(place["meta"], place["action"])
+        expect(page.locator("#memory-cloud-title")).to_have_text("Word cloud")
+        expect(page.locator("#memory-cloud")).to_have_attribute("data-packed", "1")
+        expect(page.locator(".cloud-topic")).to_have_count(0)
+        expect(page.locator("#memory-graph-legend")).to_contain_text("Idea")
+        expect(page.locator(".section-block.is-hot")).to_be_visible()
+        expect(page.locator("#memory-meta")).to_have_attribute("data-meta-mode", "ai")
+        expect(page.locator("#memory-meta-stats")).to_contain_text("AI themes")
+        expect(page.locator(".cloud-word", has_text="(fixture layer)")).to_be_visible()
+        themed = self._meta_phrase_colors(page)
+        self.assertEqual(themed["cloudFixture"], offline["cloudFixture"])
+        self.assertEqual(themed["graphFixture"], offline["graphFixture"])
+        self.assertEqual(themed["cloudRoot"], offline["cloudRoot"])
+        self.assertEqual(themed["ideas"][0]["color"], "#f0b429")
+        self.assertNotEqual(themed["graphFixture"], themed["ideas"][0]["color"])
+        page.locator("#ai-toggle").click()
+        expect(page.locator("#ai-toggle")).to_have_attribute("aria-pressed", "false")
+        expect(page.locator("#memory-meta")).to_have_attribute("data-meta-mode", "off")
+        expect(page.locator("#memory-meta-stats")).not_to_contain_text("AI themes")
+        expect(page.locator(".cloud-word", has_text="(fixture layer)")).to_have_count(0)
+        offline_again = self._meta_phrase_colors(page)
+        self.assertEqual(offline_again["cloudFixture"], offline["cloudFixture"])
+        self.assertEqual(offline_again["graphFixture"], offline["graphFixture"])
+        self.assertEqual(offline_again["ideas"], [])
+        plain_again = page.locator(".cloud-word").evaluate_all("els => els.map(el => el.textContent || '')")
+        self.assertTrue(all("(" not in text for text in plain_again))
+        page.locator("#ai-toggle").click()
+        expect(page.locator("#memory-meta")).to_have_attribute("data-meta-mode", "ai")
+        expect(page.locator(".cloud-word", has_text="(fixture layer)")).to_be_visible()
+        page.locator('a[data-path="blogs/two.md"]').click()
+        expect(page.locator("#doc")).to_contain_text("Blogs two")
+        expect(page.locator("#memory-meta")).to_have_attribute("data-meta-mode", "ai")
+        expect(page.locator(".cloud-word", has_text="(notes basket)")).to_be_visible()
+        other_note = self._meta_phrase_colors(page)
+        self.assertEqual(other_note["cloudFixture"], offline["cloudFixture"])
+        self.assertEqual(other_note["graphFixture"], offline["graphFixture"])
+        self.assertEqual(other_note["ideas"][0]["color"], "#e2d04a")
+        self.assertNotEqual(other_note["graphFixture"], other_note["ideas"][0]["color"])
+        toggle.click()
+        expect(page.locator("#memory-meta")).to_be_hidden()
+
+    def test_ask_closes_on_a_note_that_was_never_used(self):
+        chat_dir = FIXTURES / "_chats"
+        chat_dir.mkdir(exist_ok=True)
+        chat_file = chat_dir / "README.md.jsonl"
+        rows = [
+            {
+                "id": "u1",
+                "ts": "2026-01-01T00:00:01Z",
+                "role": "user",
+                "kind": "chat",
+                "text": "What is this fixture?",
+                "ok": True,
+            },
+            {
+                "id": "a1",
+                "ts": "2026-01-01T00:00:02Z",
+                "role": "assistant",
+                "kind": "chat",
+                "text": "A test note.",
+                "ok": True,
+            },
+        ]
+        chat_file.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        self.addCleanup(lambda: chat_file.exists() and chat_file.unlink())
+        page = self._open_reader()
+        page.locator("#ai-toggle").click()
+        expect(page.locator("#memory-ask")).to_be_visible()
+        expect(page.locator("#memory-ask-toggle")).to_have_text("Close")
+        page.locator('a[data-path="blogs/two.md"]').click()
+        expect(page.locator("#doc")).to_contain_text("Blogs two")
+        expect(page.locator("#memory-ask")).to_be_hidden()
+        expect(page.locator("#memory-ask-toggle")).to_have_text("Ask…")
+        page.locator('a[data-path="README.md"]').click()
+        expect(page.locator("#doc")).to_contain_text("Fixture notes")
+        expect(page.locator("#memory-ask")).to_be_visible()
+        expect(page.locator("#memory-ask-toggle")).to_have_text("Close")
 
     def test_ask_user_bubble_has_edit_pencil(self):
         chat_dir = FIXTURES / "_chats"
