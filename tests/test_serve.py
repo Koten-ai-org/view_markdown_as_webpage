@@ -378,6 +378,17 @@ class PickNotesDirTests(unittest.TestCase):
     def test_empty_is_none(self):
         self.assertIsNone(serve.pick_notes_dir(None, {"last": ""}))
 
+    def test_markdown_file_opens_its_folder(self):
+        folder, doc = serve.resolve_launch_path(str(FIXTURES / "README.md"))
+        self.assertEqual(Path(folder), FIXTURES.resolve())
+        self.assertEqual(doc, "README.md")
+        self.assertEqual(serve.note_url("http://127.0.0.1:8765", doc), "http://127.0.0.1:8765/viewer.html?doc=README.md")
+
+    def test_folder_launch_has_no_note(self):
+        folder, doc = serve.resolve_launch_path(str(FIXTURES))
+        self.assertEqual(Path(folder), FIXTURES.resolve())
+        self.assertEqual(doc, "")
+
 
 class VersionTests(unittest.TestCase):
     def test_semver(self):

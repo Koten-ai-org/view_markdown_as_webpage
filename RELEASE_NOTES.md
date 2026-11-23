@@ -17,6 +17,16 @@ python3 serve.py --version
 
 ---
 
+## 0.4.1 — 2026-11-23
+
+The Mac app stays in the Dock, and Finder can open a Markdown file with it. `VERSION` is **0.4.1**.
+
+- The Dock shows **Markdown Viewer**. Right-click that icon and choose **Quit**, or use **Quit** on the small window. Either one stops the app.
+- The Dock icon is the rounded **Md** mark. Corners outside the mark are transparent, so it is not a dark square.
+- **Open With** lists Markdown Viewer for `.md`, `.markdown`, `.mdown`, and `.mkd` files. Choosing it opens that note.
+
+---
+
 ## 0.4.0 — 2026-11-23
 
 Meta panel, stable phrase colors, and Ask stays closed until a note is used. `VERSION` is **0.4.0**.

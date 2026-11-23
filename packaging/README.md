@@ -9,7 +9,7 @@ Shipped files are on
 | macOS | `dist/Markdown-Viewer-<version>-macos-<arch>.dmg` — drag **Markdown Viewer** to Applications |
 | Windows | `dist/Markdown-Viewer-<version>-windows-x64.exe` — one-file app |
 
-The first launch opens a browser at `http://127.0.0.1:8765` and a small **Open / Quit** window. Recents and API keys live in:
+The first launch opens a browser at `http://127.0.0.1:8765` and a small **Open / Quit** window. The Mac app stays in the Dock; right-click the icon and choose **Quit**. Finder **Open With** lists it for `.md` files and opens that note. Recents and API keys live in:
 
 - macOS: `~/Library/Application Support/Markdown Viewer/`
 - Windows: `%APPDATA%\Markdown Viewer\`
@@ -32,4 +32,4 @@ Windows (PowerShell, Python 3.11):
 
 GitHub Actions workflow `.github/workflows/desktop.yml` builds both on `v*` tags or **Run workflow**.
 
-Icons are regenerated with `packaging/.venv/bin/python packaging/make_icons.py` (navy square, cyan inner tile, **Md**).
+Icons are regenerated with `packaging/.venv/bin/python packaging/make_icons.py` (rounded cyan mark, white **Md**, transparent corners).

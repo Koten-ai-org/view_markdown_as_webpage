@@ -10,7 +10,8 @@ Download a Mac `.dmg` or Windows `.exe` from
 [Releases](https://github.com/koten-ai/view_markdown_as_webpage/releases).
 Build recipes live under [`packaging/`](packaging/README.md). Double-click
 **Markdown Viewer** — it starts the local server, opens a browser, and keeps a
-small Open / Quit window.
+small Open / Quit window. On a Mac the icon stays in the Dock; right-click it
+and choose **Quit**. Finder **Open With** opens a `.md` file with this app.
 
 ```bash
 bash packaging/build_macos.sh          # writes dist/*.dmg
