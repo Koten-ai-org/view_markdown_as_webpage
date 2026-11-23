@@ -67,6 +67,7 @@ Host, port, start directory, shortcuts, and skip-list live in [`config.json`](co
 | Gear (bottom of the rail) | Settings lightbox. **Viewer** is `config.json` plus this-browser reading prefs. **Models** is Hub-style AI providers (the same vendor list as Zeus Hub Config). **Run** sends the open note through a saved prompt from `ai/prompts/*.json`. Keys stay in gitignored `config.local.json`. |
 | Folder name | Bold white label. The ▾ / ▴ button to its left hides or shows that folder. |
 | **Hide all** / **Show all** | Collapse or expand every folder group. |
+| **# Title** / **File name** | Next to Hide all. `# Title` is the heading (`README.md` shows Overview). `File name` is the real name, such as `README.md`. Hover a row to see the other label. Kept in this browser across refresh and restart. |
 | Filter | Type in the rail, or press `/`. [fuzzysort](https://github.com/farzher/fuzzysort) fuzzy-matches titles and paths and highlights the letters. Enter opens the first match. |
 | On this page | Jump list of headings on longer notes |
 | Copy | Button on code fences. Highlight in the note also opens a small menu: **Copy** and **AI Insights**. |

@@ -208,7 +208,38 @@ body.rail-resizing * {
 .rail-tools {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.15rem;
   margin: 0 0.15rem 0.35rem;
+}
+
+.nav-label-switch {
+  display: inline-flex;
+  align-items: center;
+  background: var(--rail-2);
+  border-radius: 0.4rem;
+  padding: 0.1rem;
+}
+.nav-label-switch button {
+  border: 0;
+  background: transparent;
+  color: #8b9aab;
+  font: 650 0.68rem var(--sans);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  padding: 0.22rem 0.42rem;
+  border-radius: 0.32rem;
+  white-space: nowrap;
+}
+.nav-label-switch button[aria-pressed="true"] {
+  background: rgba(0, 180, 230, 0.28);
+  color: #fff;
+}
+.nav-label-switch button:hover { color: #fff; }
+.nav-label-switch button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 1px;
 }
 
 .nav-all {

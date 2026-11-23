@@ -15,6 +15,8 @@ python3 serve.py --version
 
 ## Unreleased
 
+- Notes rail: **# Title** / **File name** switch next to Hide all. File name shows `README.md` instead of Overview. Hover a row for the other label. The choice stays in this browser (`mdview-nav-label`) across refresh and restart.
+
 ---
 
 ## 0.2.0 — 2026-10-02

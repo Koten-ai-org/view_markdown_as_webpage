@@ -29,6 +29,7 @@
   const FOLD_KEY = "mdview-fold";
   const RAIL_W_KEY = "mdview-rail-w";
   const AI_ON_KEY = "mdview-ai";
+  const LABEL_KEY = "mdview-nav-label";
   const RAIL_MIN = 180;
   const resizeHandle = document.getElementById("rail-resize");
 
@@ -2082,7 +2083,7 @@
         items.push({
           el: a,
           label: a.dataset.label || "",
-          hay: (a.dataset.label || "") + " " + (a.dataset.path || "") + " " + (a.dataset.group || ""),
+          hay: (a.dataset.titleLabel || "") + " " + (a.dataset.fileLabel || "") + " " + (a.dataset.path || "") + " " + (a.dataset.group || ""),
         });
       });
       const hits = fuzzysort.go(query, items, { key: "hay", threshold: 0.4 });
@@ -2102,7 +2103,7 @@
     } else {
       const q = query.toLowerCase();
       links.forEach(function (a) {
-        const hay = ((a.dataset.label || "") + " " + (a.dataset.path || "")).toLowerCase();
+        const hay = ((a.dataset.titleLabel || "") + " " + (a.dataset.fileLabel || "") + " " + (a.dataset.path || "")).toLowerCase();
         a.hidden = hay.indexOf(q) === -1;
         a.textContent = a.dataset.label || "";
       });
@@ -2175,7 +2176,9 @@
         a.href = "?doc=" + encodeURIComponent(n.path);
         a.dataset.path = n.path;
         a.dataset.group = g;
-        a.dataset.label = shortTitle(n);
+        a.dataset.titleLabel = shortTitle(n);
+        a.dataset.fileLabel = fileNameOf(n);
+        paintNoteLink(a);
         a.textContent = a.dataset.label;
         a.addEventListener("click", function (ev) {
           if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;
@@ -2193,6 +2196,50 @@
     });
     applyFilter();
   }
+
+  let navLabelMode = "title";
+  try {
+    if (localStorage.getItem(LABEL_KEY) === "file") navLabelMode = "file";
+  } catch (e) { /* ignore */ }
+
+  function fileNameOf(n) {
+    const path = String((n && n.path) || "");
+    const slash = path.lastIndexOf("/");
+    return slash === -1 ? path : path.slice(slash + 1);
+  }
+
+  function syncLabelSwitch() {
+    const titleBtn = document.getElementById("nav-label-title");
+    const fileBtn = document.getElementById("nav-label-file");
+    if (titleBtn) titleBtn.setAttribute("aria-pressed", navLabelMode === "title" ? "true" : "false");
+    if (fileBtn) fileBtn.setAttribute("aria-pressed", navLabelMode === "file" ? "true" : "false");
+  }
+
+  function paintNoteLink(a) {
+    const titleLabel = a.dataset.titleLabel || "";
+    const fileLabel = a.dataset.fileLabel || "";
+    const shown = navLabelMode === "file" ? fileLabel : titleLabel;
+    const other = navLabelMode === "file" ? titleLabel : fileLabel;
+    a.dataset.label = shown;
+    if (other && other !== shown) a.title = other;
+    else a.removeAttribute("title");
+  }
+
+  function setNavLabelMode(mode) {
+    navLabelMode = mode === "file" ? "file" : "title";
+    try {
+      localStorage.setItem(LABEL_KEY, navLabelMode);
+    } catch (e) { /* ignore */ }
+    syncLabelSwitch();
+    navList.querySelectorAll(".nav-group-body a").forEach(paintNoteLink);
+    applyFilter();
+  }
+
+  syncLabelSwitch();
+  const navLabelTitle = document.getElementById("nav-label-title");
+  const navLabelFile = document.getElementById("nav-label-file");
+  if (navLabelTitle) navLabelTitle.addEventListener("click", function () { setNavLabelMode("title"); });
+  if (navLabelFile) navLabelFile.addEventListener("click", function () { setNavLabelMode("file"); });
 
   function shortTitle(n) {
     const t = n.title
