@@ -15,7 +15,13 @@ python3 serve.py --version
 
 ## Unreleased
 
-- Notes rail: **# Title** / **File name** switch next to Hide all. File name shows `README.md` instead of Overview. Hover a row for the other label. The choice stays in this browser (`mdview-nav-label`) across refresh and restart.
+---
+
+## 0.3.0 — 2026-11-23
+
+Notes rail can show the real file name. `VERSION` is **0.3.0**.
+
+- **# Title** / **File name** switch next to Hide all. `# Title` keeps the heading (`README.md` shows Overview). **File name** shows the real name, including the extension. Hover a row for the other label. The choice stays in this browser (`mdview-nav-label`) across refresh and restart.
 
 ---
 
