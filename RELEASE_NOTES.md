@@ -15,6 +15,8 @@ python3 serve.py --version
 
 ## Unreleased
 
+- Ask stays closed on a note that has never been used. Opening a note that already has a thread opens the chat. Switching files no longer keeps the previous note's text box open.
+
 ---
 
 ## 0.3.0 — 2026-11-23

@@ -536,6 +536,43 @@ class ViewerFoldTests(unittest.TestCase):
         page.locator("#ai-toggle").click()
         expect(page.locator("#ai-toggle")).to_have_attribute("aria-pressed", "false")
 
+    def test_ask_closes_on_a_note_that_was_never_used(self):
+        chat_dir = FIXTURES / "_chats"
+        chat_dir.mkdir(exist_ok=True)
+        chat_file = chat_dir / "README.md.jsonl"
+        rows = [
+            {
+                "id": "u1",
+                "ts": "2026-01-01T00:00:01Z",
+                "role": "user",
+                "kind": "chat",
+                "text": "What is this fixture?",
+                "ok": True,
+            },
+            {
+                "id": "a1",
+                "ts": "2026-01-01T00:00:02Z",
+                "role": "assistant",
+                "kind": "chat",
+                "text": "A test note.",
+                "ok": True,
+            },
+        ]
+        chat_file.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        self.addCleanup(lambda: chat_file.exists() and chat_file.unlink())
+        page = self._open_reader()
+        page.locator("#ai-toggle").click()
+        expect(page.locator("#memory-ask")).to_be_visible()
+        expect(page.locator("#memory-ask-toggle")).to_have_text("Close")
+        page.locator('a[data-path="blogs/two.md"]').click()
+        expect(page.locator("#doc")).to_contain_text("Blogs two")
+        expect(page.locator("#memory-ask")).to_be_hidden()
+        expect(page.locator("#memory-ask-toggle")).to_have_text("Ask…")
+        page.locator('a[data-path="README.md"]').click()
+        expect(page.locator("#doc")).to_contain_text("Fixture notes")
+        expect(page.locator("#memory-ask")).to_be_visible()
+        expect(page.locator("#memory-ask-toggle")).to_have_text("Close")
+
     def test_ask_user_bubble_has_edit_pencil(self):
         chat_dir = FIXTURES / "_chats"
         chat_dir.mkdir(exist_ok=True)

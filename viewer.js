@@ -1614,29 +1614,40 @@
       }
       log.appendChild(row);
     });
-    const hasTurns = messages.some(function (msg) {
-      return msg.role === "user" || msg.role === "assistant";
-    });
+    const hasTurns = chatHasTurns(messages);
     if (copyBtn) copyBtn.hidden = !(on && hasTurns);
     if (askBox) {
-      if (!on) askBox.hidden = true;
-      else if (hasTurns && !askClosed) askBox.hidden = false;
+      if (!on || askClosed) askBox.hidden = true;
+      else if (hasTurns) askBox.hidden = false;
     }
     syncAskToggle();
     log.scrollTop = log.scrollHeight;
   }
 
+  function chatHasTurns(messages) {
+    return (messages || []).some(function (msg) {
+      return msg.role === "user" || msg.role === "assistant";
+    });
+  }
+
   async function loadChat(path) {
     if (!path) return;
-    askClosed = false;
+    askClosed = true;
+    const pendingBox = document.getElementById("memory-ask");
+    if (pendingBox) pendingBox.hidden = true;
+    syncAskToggle();
     const gen = ++chatGen;
     try {
       const res = await fetch("/api/chat?path=" + encodeURIComponent(path), { cache: "no-store" });
       const data = await res.json().catch(function () { return {}; });
       if (gen !== chatGen || path !== currentPath) return;
+      askClosed = !chatHasTurns(data && data.messages);
       renderChat(data);
     } catch (err) {
-      if (gen === chatGen) renderChat({ messages: [] });
+      if (gen === chatGen) {
+        askClosed = true;
+        renderChat({ messages: [] });
+      }
     }
   }
 
